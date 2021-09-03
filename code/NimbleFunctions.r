@@ -243,13 +243,13 @@ sampler_mySPIM <- nimbleFunction(
         k <- control$M
         probs <- numeric(k)
         logProbs <- numeric(k)
-		cannotlink <- control$cannotlink	# n x n matrix where a 1 indicates i cannot link to detection j.
-        nodeIndices <- as.numeric(gsub('[^[:digit:]]', '', target))
-		n_grp <- length(nodeIndices)
+		cannotlink <- extractControlElement(control, 'cannotlink', 'identity')	# n x n matrix where a 1 indicates i cannot link to detection j.
+        nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', targetNodesAsScalar[1]))
+		n_grp <- length(targetNodesAsScalar)
     },
     run = function() {
 		psi <- model[['psi']]
-        currentValue <- model[["ID"]][nodeIndices[1]]
+        currentValue <- model[["ID"]][nodeIndex]
 		logProbs[currentValue] <<- model$getLogProb(calcNodes)
 		n_currentValue <- sum(model[['ID']] == currentValue)
 		no_link <- 0
@@ -266,7 +266,7 @@ sampler_mySPIM <- nimbleFunction(
 					{
 						logProbs[i] <<- -Inf
 					}else {
-						no_link <- sum(cannotlink[model[["ID"]] == i, nodeIndices])	# This is the check to see if there are cannot links.
+						no_link <- sum(cannotlink[model[["ID"]] == i, nodeIndex])	# This is the check to see if there are cannot links.
 						if(no_link > 0)
 						{
 							logProbs[i] <<- -Inf
