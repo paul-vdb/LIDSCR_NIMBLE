@@ -98,3 +98,46 @@ simASCR <- function(N = 50, sigma = 0.5, sigma_toa = 0.01, g0 = 1, lambda = 0.5,
     }
     list(capt = capthist, toa = toa, obs = obs, pop = pop)
 }
+
+# Stolen code for making habitat mask but without loading package:
+# Convert secr mask and traps objects for use with Nimble
+convertMask <- function(secrmask, secrtraps, plot = TRUE) {
+
+  pixWidth <- min(abs(diff(secrmask$x)))
+  bbox <- matrix(c(min(secrmask$x), max(secrmask$x), min(secrmask$y), max(secrmask$y)), nrow = 2, ncol = 2)
+  # Create 'false origin' so that SW corner of matrix is at [1, 1]
+  origin <- bbox[1, ]
+
+  # Get dimensions of the matrix
+  nrows <- ceiling((bbox[2, 1] - bbox[1, 1]) / pixWidth) + 1
+  ncols <- ceiling((bbox[2, 2] - bbox[1, 2]) / pixWidth) + 1
+  habMat <- matrix(0L, nrow=nrows, ncol=ncols)
+  # Convert mask x and y to col/row numbers
+  dex <- as.matrix(ceiling(sweep(secrmask, 2, origin) / pixWidth)) + 1
+  for(i in 1:nrow(dex)) habMat[dex[i,1], dex[i,2]] <- 1L
+
+  # Convert trap coordinates to the new units:
+  newtraps <- sweep(secrtraps, 2, origin) / pixWidth + 1
+
+  out <- list(habMat = habMat, 
+              trapMat = as.matrix(newtraps), 
+              upperLimit = c(x=nrows+1, y=ncols+1),
+              pixelWidth = pixWidth,
+              area = sum(habMat) * pixWidth^2)
+  attr(out, "boundingbox") <- bbox
+  attr(out, "origin") <- origin
+  attr(out, "pixelWidth") <- pixWidth
+  
+  if(plot) {
+	image(habMat)
+  }
+  return(out)
+}
+
+
+
+rowProd <- function(x)
+{
+	if(is.null(dim(x))) return(x)
+	apply(x, 1, prod)
+}
