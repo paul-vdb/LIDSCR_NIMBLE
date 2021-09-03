@@ -142,8 +142,8 @@ marks <- unique(bobcats$mark)
 marks <- marks[grep("L|R", marks)]
 for(i in 1:length(marks)){
 	add <- which(bobcats$mark == marks[i])
-	add.comma <- paste(add, collapse = ",")
-	conf$addSampler(target = paste0('ID[c(', add.comma, ')]'), type = 'mySPIM', scalarComponents = TRUE, control = list(M = M, cannotlink = cannotlink))
+	add.names <- paste0("ID[",add, "]")
+	conf$addSampler(target = add.names, type = 'mySPIM', scalarComponents = FALSE, control = list(M = M, cannotlink = cannotlink))
 }
 # conf$printSamplers()
 
