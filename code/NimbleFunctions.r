@@ -25,15 +25,75 @@ rID <- nimbleFunction(
     run = function(n = integer(0)) {
         print('Error: rX() function not implemented')
         returnType(integer(0))
-        return(0)
+        return(1)
     }
 )
+
+  # Sampler without known detection times:
+dnorm_vector_marg <- nimbleFunction(
+  run = function( x = double(1),
+                  mean = double(1),
+                  sd = double(0),
+				  y = double(1),
+                  log = integer(0, default = 0)
+                  ) {
+    returnType(double(0))
+	# This is not really a normal distribution but a small correction and it's proportional.
+	# Fingers crossed...
+	m <- sum(y)
+	if(m == 1){
+		if(log) return(0) else return(1)
+	}
+	tdiff <- y*(x - mean)
+	etdiff <- sum(tdiff)/m
+    logProb <- sum(y*dnorm(tdiff, mean = etdiff, sd = sd, log = TRUE)) + m*log(sd) + (1-m)*log(sd) # Normal correction factor.
+    if(log) return(logProb) else return(exp(logProb))
+  })
+
+rnorm_vector_marg <- nimbleFunction(
+  run = function( n = integer(0, default = 1),
+                  mean = double(1),
+                  sd = double(0),
+				  y = double(1)
+  ) {
+    returnType(double(1))
+    return(rnorm(length(y), mean = mean, sd = sd))
+  })
+
+dbinom_vector_ascr <- nimbleFunction(
+  run = function( x = double(1),
+                  size = double(1),
+                  prob = double(1), 
+				  pcapt = double(0),
+                  log = integer(0, default = 0)
+                  ) {
+    returnType(double(0))
+    logProb <- sum(dbinom(x, prob = prob, size = size, log = TRUE)) - log(pcapt)
+    if(log) return(logProb) else return(exp(logProb))
+  })
+
+#' @rdname dbinom_vector
+#' @export
+rbinom_vector_ascr <- nimbleFunction(
+  run = function( n = integer(0, default = 1),
+                  size = double(1),
+                  prob = double(1),
+				  pcapt = double(0)
+  ) {
+    returnType(double(1))
+    return(rbinom(length(size), prob = prob, size = size))
+  })
 
 registerDistributions(
     list(dX = list(BUGSdist = 'dX()',
                    types = c('value = double(1)')),
 		 dID = list(BUGSdist = 'dID()',
-                   types = c('value = integer(0)'))		   ))
+                   types = c('value = integer(0)')),
+		 dbinom_vector_ascr = list(BUGSdist = 'dbinom_vector_ascr()',
+				   types =c('value = double(1)')),
+		 dnorm_vector_marg = list(BUGSdist = 'dnorm_vector_marg(mean, sd, y)',
+				   types = c('value = double(1)', 'mean = double(1)', 'sd = double(0)', 'y = double(1)'))		   
+				   ) )
 
 sampler_myX <- nimbleFunction(
     name = 'sampler_myX',
