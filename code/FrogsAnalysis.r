@@ -93,13 +93,14 @@ code <- nimbleCode({
     psi ~ dbeta(1, 1)      # Prior on data augmentation bernoulli vec.
     sigma ~ dunif(0, 10)	# Now the prior is directly on sigma to be consistent with literature.
     tau2 <- 1/(2*sigma^2)
-	sigmatoa <- sqrt(sigmatoa2)
-	sigmatoa2 ~ dunif(0,1)
+	# sigmatoa <- sqrt(sigmatoa2)
+	sigmatoa ~ dunif(0,1)
 	lam0 ~ dunif(0, 20)
     for(i in 1:M) {
         z[i] ~ dbern(psi)
         X[i, 1] ~ dunif(xlim[1], xlim[2])
         X[i, 2] ~ dunif(ylim[1], ylim[2])
+		# X[i, 1:2] ~ dX()
         d2[i,1:J] <- (X[i,1]-traps[1:J,1])^2 + (X[i,2]-traps[1:J,2])^2
 		expTime[i,1:J] <- sqrt(d2[i,1:J])/nu
         # pkj[i,1:J] <- exp(-d2[i,1:J]*tau2)*z[i]
@@ -131,9 +132,9 @@ toa <- capt.all$toa
 tmin <- apply(toa, 1, max)
 keep <- which(tmin < 1200)
 toa <- toa[keep,]
-# ID <- capt.all$bincapt[, 7]
-# ID <- ID[keep]
-# ID <- as.integer(as.factor(ID))
+ID <- capt.all$bincapt[, 7]
+ID <- ID[keep]
+ID <- as.integer(as.factor(ID))
 capt <- capt.all$bincapt[,1:6]
 capt <- capt[keep,]
 
@@ -167,15 +168,19 @@ data <- list(
 	ID = rep(NA, nrow(capt))
 )
 
-Rmodel <- nimbleModel(code, constants, data, inits = inits())
+Rmodel <- nimbleModel(code, constants, data, inits = initsTRUE())
 
 conf <- configureMCMC(Rmodel)
 
 conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'lam0', 'Nhat', 'D'))
 
 conf$removeSamplers('X')
-# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = limits$xlim, ylim = limits$ylim, J = nrow(traps)))
-for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(adaptive = FALSE))
+# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
+for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE)
+
+conf$removeSamplers(c('sigma', 'lam0'))
+conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
+
 
 # conf$printSamplers()
 
@@ -193,12 +198,12 @@ Rmcmc <- buildMCMC(conf)
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-# Cmcmc$run(5000)
-# mvSamples <- Cmcmc$mvSamples
-# samples <- as.matrix(mvSamples)
-# out <- mcmc(samples)
-# plot(out[, c("lambda", "sigmatoa", "Nhat")])
-# plot(out[, c("sigma", "lam0")])
+Cmcmc$run(5000)
+mvSamples <- Cmcmc$mvSamples
+samples <- as.matrix(mvSamples)
+out <- mcmc(samples[-(1:2500),])
+plot(out[, c("lambda", "sigmatoa", "Nhat")])
+plot(out[, c("sigma", "lam0")])
 
 # samples <- runMCMC(Cmcmc, niter = 10000, nburnin = 5000, nchains = 1, thin = 3, inits = initsTRUE())
 # out <- as.mcmc(samples)
@@ -207,8 +212,9 @@ out <- mcmc.list(list(as.mcmc(samples[[1]]), as.mcmc(samples[[2]]), as.mcmc(samp
 plot(out[,1:3])
 dev.new()
 plot(out[,4:6])
-
-
+save(out, file = "frog_unmarked.rda")
+d <- seq(0, 10, by = 0.1)
+plot(d, (1-exp(-3.6*exp(-d^2/(2*2.9)))))
 
 
 
