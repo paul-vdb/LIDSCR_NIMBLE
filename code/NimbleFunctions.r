@@ -326,18 +326,20 @@ sampler_mySPIM <- nimbleFunction(
 					{
 						logProbs[i] <<- -Inf
 					}else {
-						no_link <- sum(cannotlink[model[["ID"]] == i, nodeIndex])	# This is the check to see if there are cannot links.
+						no_link <- sum(cannotlink[model[['ID']] == i, nodeIndex])	# This is the check to see if there are cannot links.
 						if(no_link > 0)
 						{
 							logProbs[i] <<- -Inf
 						}else {
-							values(model, targetNodesAsScalar) <<- i
+							# values(model, targetNodesAsScalar) <<- i
+							values(model, targetNodesAsScalar) <<- rep(i, n_grp) 					
 							logProbs[i] <<- model$calculate(calcNodes)
 							if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
 						}
 					}
 				}else {
-					values(model, targetNodesAsScalar) <<- i
+					# values(model, targetNodesAsScalar) <<- i
+					values(model, targetNodesAsScalar) <<- rep(i, n_grp) ##  replace with this					
 					logProbs[i] <<- model$calculate(calcNodes) + log(psi) - log(1-psi) - model[['Hk']][i]
 					if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
 				}
@@ -347,7 +349,8 @@ sampler_mySPIM <- nimbleFunction(
         probs <<- exp(logProbs)
         newValue <- rcat(1, probs)
         if(newValue != currentValue) {
-            values(model, targetNodesAsScalar) <<- newValue
+            # values(model, targetNodesAsScalar) <<- newValue
+			values(model, targetNodesAsScalar) <<- rep(newValue, n_grp) ##  replace with this			
 			if(model[['z']][newValue] == 0){
 				model[['z']][newValue] <<- 1
 				model$calculate(calcNodesZ)

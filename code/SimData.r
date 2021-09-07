@@ -119,7 +119,8 @@ convertMask <- function(secrmask, secrtraps, plot = TRUE) {
   # Convert trap coordinates to the new units:
   newtraps <- sweep(secrtraps, 2, origin) / pixWidth + 1
 
-  out <- list(habMat = habMat, 
+  out <- list(habMat = habMat,
+			  scaledMask = dex,
               trapMat = as.matrix(newtraps), 
               upperLimit = c(x=nrows+1, y=ncols+1),
               pixelWidth = pixWidth,
@@ -133,8 +134,6 @@ convertMask <- function(secrmask, secrtraps, plot = TRUE) {
   }
   return(out)
 }
-
-
 
 rowProd <- function(x)
 {

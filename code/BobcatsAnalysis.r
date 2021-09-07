@@ -9,6 +9,7 @@ library(raster)
 library(nimble)
 library(nimbleSCR)
 library(coda)
+library(ggplot2)
 
 
 source("NimbleFunctions.R")
@@ -23,49 +24,56 @@ habitatMask <- convertMask(secrmask, secrtraps, plot = TRUE)
 habMat <- habitatMask$habMat
 traps <- habitatMask$trapMat
 upperlimit <- habitatMask$upperLimit
+scaledMask <- habitatMask$scaledMask
 Time <- 187
 M <- 150
-ID <- bobcats$mark
-ID[grep("L|R", bobcats$mark)] <- NA
-ID <- as.numeric(ID)
+marks <- bobcats$mark
+IDbobcat <- marks
+IDbobcat[grep("L|R", marks)] <- NA
+IDbobcat <- as.numeric(IDbobcat)
+kobs <- max(IDbobcat, na.rm = TRUE)
 J <- nrow(traps)
 y <- apply(bobcats$capt, 1, FUN = function(x){which(x == 1)})
 Time <- 187
 mustlink <- matrix(0, nrow = length(y), ncol = length(y))+diag(1, length(y))
 cannotlink <- matrix(0, nrow = length(y), ncol = length(y))
-
-for(i in 1:length(y))
+n <- length(y)
+for(i in 1:n)
 {
 	marki <- bobcats$mark[i]
 	LR <- gsub("[0-9]", "", marki)
 	num <-  gsub("[[:alpha:]]", "", marki)
 	ml <- bobcats$mark == marki
 	mustlink[ml,i] <- 1
+	mustlink[i,ml] <- 1	
 	if(LR == ""){
 		cannotlink[!ml,i] <- 1
+		cannotlink[i,!ml] <- 1		
 	}else{
-		cannotlink[!ml & grepl(LR, bobcats$mark)] <- 1
+		cannotlink[!ml & grepl(LR, bobcats$mark), i] <- 1
+		cannotlink[i,!ml & grepl(LR, bobcats$mark)] <- 1
+		cannotlink[grep("L|R", bobcats$mark, invert = TRUE), i] <- 1
+		cannotlink[i, grep("L|R", bobcats$mark, invert = TRUE)] <- 1		
 	}
 }
 
-
 inits <- function(){
     p <- runif(1, 0.1, 0.7)
-    kobs <- max(ID, na.rm = TRUE)
-	id.known <- as.integer(factor(bobcats$mark))
-	id.lr <- as.integer(factor(id.known[is.na(ID)]))
-	K <- max(id.known)
-	ID[is.na(ID)] <- id.lr + kobs
+	id.known <- factor(bobcats$mark)
+	id.lr <- as.integer(factor(grep("L|R", id.known, value = TRUE)))
+	ID <- IDbobcat
+	ID[is.na(IDbobcat)] <- id.lr + kobs
+	ID[!is.na(IDbobcat)] <- NA	# True Values should be NA...
 	list(
         lambda = runif(1, 0.1, 2),
         psi = p,
         sigma = runif(1, 0.1, 1.5),
-        X = cbind(runif(M, 1, upperlimit[1]), 
-                  runif(M, 1, upperlimit[2])),
+        X = scaledMask[sample(nrow(scaledMask), M),],
         ID = ID,
-        z = c(rep(1,K), rep(0, M-K))
+        z = c(rep(NA, kobs), rep(1,max(id.lr)), rep(0, M-kobs-max(id.lr)))
     )
 }
+
 
 code <- nimbleCode({
     lambda ~ dunif(0, 20) # Detection rate at distance 0
@@ -118,8 +126,8 @@ data <- list(
     one = 1,
     ones = rep(1, length(y)),
 	OK = rep(1, M),
-	z =  c(rep(1, max(ID, na.rm = TRUE)), rep(NA, M - max(ID, na.rm = TRUE))),
-	ID = ID,
+	z =  c(rep(1, max(IDbobcat, na.rm = TRUE)), rep(NA, M - max(IDbobcat, na.rm = TRUE))),
+	ID = IDbobcat,
 	habMat = habMat)
 
 Rmodel <- nimbleModel(code, constants, data, inits = inits())
@@ -133,27 +141,46 @@ conf$removeSamplers('X')
 for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE) #, control = list(adaptive = FALSE)
 
 conf$removeSamplers('z')
-conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
+# Careful how to add sampler back!!
+conf$addSampler('z[16:150]', type = 'myBinary', scalarComponents = TRUE)
+# conf$printSamplers("z")
 
 conf$removeSamplers('ID')
 # conf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M = M))
 # conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
-marks <- unique(bobcats$mark)
-marks <- marks[grep("L|R", marks)]
+mark <- unique(bobcats$mark)
+mark <- mark[grep("L|R", mark)]
 for(i in 1:length(marks)){
-	add <- which(bobcats$mark == marks[i])
+	add <- which(bobcats$mark == mark[i])
 	add.names <- paste0("ID[",add, "]")
 	conf$addSampler(target = add.names, type = 'mySPIM', scalarComponents = FALSE, control = list(M = M, cannotlink = cannotlink))
 }
-# conf$printSamplers()
+# conf$printSamplers("ID")
 
 Rmcmc <- buildMCMC(conf)
 
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-Cmcmc$run(5000)
+Cmcmc$run(10000)
 mvSamples <- Cmcmc$mvSamples
 samps <- as.matrix(mvSamples)
-samps.mcmc <- mcmc(samps)
+samps <- cbind(samps, samps[,"sigma"]*attr(habitatMask, "pixelWidth"))
+colnames(samps)[ncol(samps)] <- "sigma_scaled"
+samps.mcmc <- mcmc(samps[-(1:5000),c("sigma", "lambda", "Nhat", 'psi', 'sigma_scaled')])
 plot(samps.mcmc)
+summary(samps.mcmc)
+
+
+post.x <- samps[-(1:5000),grep("X", colnames(samps))]
+post.x1 <- post.x[,grep("1]", colnames(post.x))]
+post.x2 <- post.x[,grep("2]", colnames(post.x))]
+post.id <- samps[-(1:5000),grep("ID", colnames(samps))]
+x1 <- data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,85])], y= post.x2[cbind(1:nrow(post.id), post.id[,85])])
+allx <- cbind(post.x1[,20], post.x2[,20])
+ggplot(data = data.frame(traps), aes(x=X,y=Y)) + geom_point(shape = 4) + 
+	theme_classic() + geom_line(data = x1, aes(x=x, y=y), col = "red", alpha = 0.1)
+ggplot(data = data.frame(traps), aes(x=X,y=Y)) + geom_point(shape = 4) + 
+	theme_classic() + geom_line(data = data.frame(allx), aes(x=X1, y=X2), col = "red", alpha = 0.1)
+
+sum(post.id[,1] == post.id[,14])/nrow(post.id)
