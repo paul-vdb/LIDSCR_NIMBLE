@@ -134,7 +134,7 @@ Rmodel <- nimbleModel(code, constants, data, inits = inits())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('sigma', 'lambda', 'psi', 'Nhat'))
+conf$setMonitors(c('sigma', 'lambda', 'psi', 'Nhat', 'ID', 'z'))
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = limits$xlim, ylim = limits$ylim, J = nrow(traps)))
@@ -150,7 +150,7 @@ conf$removeSamplers('ID')
 # conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
 mark <- unique(bobcats$mark)
 mark <- mark[grep("L|R", mark)]
-for(i in 1:length(marks)){
+for(i in 1:length(mark)){
 	add <- which(bobcats$mark == mark[i])
 	add.names <- paste0("ID[",add, "]")
 	conf$addSampler(target = add.names, type = 'mySPIM', scalarComponents = FALSE, control = list(M = M, cannotlink = cannotlink))
@@ -171,16 +171,16 @@ samps.mcmc <- mcmc(samps[-(1:5000),c("sigma", "lambda", "Nhat", 'psi', 'sigma_sc
 plot(samps.mcmc)
 summary(samps.mcmc)
 
+indx <- grep('ID', colnames(samps))
+id.out <- samps[, indx]
+z.out <- samps[,grep('z', colnames(samps))]
+apply(id.out, 2, FUN = function(x){(sweep(id.out, 2, x) == 0)}
 
-post.x <- samps[-(1:5000),grep("X", colnames(samps))]
-post.x1 <- post.x[,grep("1]", colnames(post.x))]
-post.x2 <- post.x[,grep("2]", colnames(post.x))]
-post.id <- samps[-(1:5000),grep("ID", colnames(samps))]
-x1 <- data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,85])], y= post.x2[cbind(1:nrow(post.id), post.id[,85])])
-allx <- cbind(post.x1[,20], post.x2[,20])
-ggplot(data = data.frame(traps), aes(x=X,y=Y)) + geom_point(shape = 4) + 
-	theme_classic() + geom_line(data = x1, aes(x=x, y=y), col = "red", alpha = 0.1)
-ggplot(data = data.frame(traps), aes(x=X,y=Y)) + geom_point(shape = 4) + 
-	theme_classic() + geom_line(data = data.frame(allx), aes(x=X1, y=X2), col = "red", alpha = 0.1)
+tmp <- sweep(id.out, 1, id.out[,30]) == 0
+colSums(tmp)
+bobcats$mark[30:34]
+which(id.out[,c("ID[30]")] ==  id.out[,c("ID[31]")])
+cannotlink[30,31:34]
 
-sum(post.id[,1] == post.id[,14])/nrow(post.id)
+no_link <- sum(cannotlink[model[['ID']] == i, nodeIndex])
+table(z.out[cbind(1:nrow(samps), id.out[,72])])
