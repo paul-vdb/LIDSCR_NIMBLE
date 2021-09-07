@@ -110,6 +110,7 @@ code <- nimbleCode({
     one ~ dbern(p)
     # Predicted population size
     Nhat <- sum(z[1:M])
+	sigma_scaled <- sigma*pixelWidth
 })
 
 constants <- list(
@@ -119,7 +120,8 @@ constants <- list(
     Time = Time,
     M = M,
     n_obs = length(y),
-	y = y
+	y = y,
+	pixelWidth = attr(habitatMask, "pixelWidth")
 	)
 
 data <- list(
@@ -134,7 +136,7 @@ Rmodel <- nimbleModel(code, constants, data, inits = inits())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('sigma', 'lambda', 'psi', 'Nhat', 'ID', 'z'))
+conf$setMonitors(c('sigma', 'lambda', 'psi', 'Nhat', 'sigma_scaled'))
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = limits$xlim, ylim = limits$ylim, J = nrow(traps)))
@@ -162,14 +164,21 @@ Rmcmc <- buildMCMC(conf)
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-Cmcmc$run(10000)
-mvSamples <- Cmcmc$mvSamples
-samps <- as.matrix(mvSamples)
-samps <- cbind(samps, samps[,"sigma"]*attr(habitatMask, "pixelWidth"))
-colnames(samps)[ncol(samps)] <- "sigma_scaled"
-samps.mcmc <- mcmc(samps[-(1:5000),c("sigma", "lambda", "Nhat", 'psi', 'sigma_scaled')])
-plot(samps.mcmc)
-summary(samps.mcmc)
+# Cmcmc$run(10000)
+# mvSamples <- Cmcmc$mvSamples
+# samps <- as.matrix(mvSamples)
+# samps <- cbind(samps, samps[,"sigma"]*attr(habitatMask, "pixelWidth"))
+# colnames(samps)[ncol(samps)] <- "sigma_scaled"
+# samps.mcmc <- mcmc(samps[-(1:5000),c("sigma", "lambda", "Nhat", 'psi', 'sigma_scaled')])
+# plot(samps.mcmc)
+# summary(samps.mcmc)
+# plot(samps.mcmc[,c("lambda", "sigma_scaled", "Nhat")])
+
+
+samples <- runMCMC(Cmcmc, niter = 10000, nburnin = 5000, nchains = 3, thin = 1, inits = list(inits(), inits(), inits()))
+out <- mcmc.list(list(as.mcmc(samples[[1]]), as.mcmc(samples[[2]]), as.mcmc(samples[[3]])))
+plot(out[, c("Nhat", "sigma_scaled", "lambda")])
+
 
 indx <- grep('ID', colnames(samps))
 id.out <- samps[, indx]
@@ -184,3 +193,8 @@ cannotlink[30,31:34]
 
 no_link <- sum(cannotlink[model[['ID']] == i, nodeIndex])
 table(z.out[cbind(1:nrow(samps), id.out[,72])])
+
+
+
+
+

@@ -281,6 +281,7 @@ sampler_myIDZ <- nimbleFunction(
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
         } else {
+			model[['z']][newValue] <<- 1
             nimCopy(from = mvSaved, to = model, row = 1, nodes = target, logProb = TRUE)
             nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
