@@ -44,9 +44,9 @@ dnorm_vector_marg <- nimbleFunction(
 	if(m == 1){
 		if(log) return(0) else return(1)
 	}
-	tdiff <- y*(x - mean)
-	etdiff <- sum(tdiff)/m
-    logProb <- sum(y*dnorm(tdiff, mean = etdiff, sd = sd, log = TRUE)) + m*log(sd) + (1-m)*log(sd) # Normal correction factor.
+	td <- x[y==1] - mean[y==1]
+	etdiff <- sum(td)/m
+    logProb <- (1-m)*log(sd) - sum((td - etdiff)^2)/(2*sd^2) # Normal correction factor.
     if(log) return(logProb) else return(exp(logProb))
   })
 
@@ -277,12 +277,12 @@ sampler_myIDZ <- nimbleFunction(
 				model$calculate(calcNodesZ)
 			}
             model$calculate(calcNodes)	# I've made ID independent of z so this shouldn't double.
-            nimCopy(from = model, to = mvSaved, row = 1, nodes = target, logProb = TRUE)
+            nimCopy(from = model, to = mvSaved, row = 1, nodes = c(target, 'z'), logProb = TRUE)
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
         } else {
 			model[['z']][newValue] <<- 1
-            nimCopy(from = mvSaved, to = model, row = 1, nodes = target, logProb = TRUE)
+            nimCopy(from = mvSaved, to = model, row = 1, nodes = c(target, 'z'), logProb = TRUE)
             nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
         }
@@ -369,4 +369,133 @@ sampler_mySPIM <- nimbleFunction(
     },
     methods = list( reset = function() { } )
 )
+
+# sampler_myIDZASCR <- nimbleFunction(
+    # name = 'sampler_myIDZASCR',
+    # contains = sampler_BASE,
+    # setup = function(model, mvSaved, target, control) {
+        # calcNodes <- model$getDependencies(target)
+        # calcNodesNoSelf <- model$getDependencies(target, self = FALSE)
+		# calcNodesZ <- model$getDependencies('z')
+        # isStochCalcNodesNoSelf <- model$isStoch(calcNodesNoSelf)
+        # calcNodesNoSelfDeterm <- calcNodesNoSelf[!isStochCalcNodesNoSelf]
+        # calcNodesNoSelfStoch <- calcNodesNoSelf[isStochCalcNodesNoSelf]
+		# nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', target))
+        # k <- control$M
+        # probs <- numeric(k)
+        # logProbs <- numeric(k)
+		# J <- control$J
+		# size <- rep(1, J)		
+    # },
+    # run = function() {
+		# psi <- model[['psi']]
+        # currentValue <- model[[target]]
+		# logProbs[currentValue] <<- dbinom_vector(model[['y']][nodeIndex,1:J], size = size, model[['pkj']][currentValue,1:J], 1) +
+			# dnorm_vector_marg(model[['toa']][nodeIndex, 1:J], mean = model[['expTime']][currentValue,1:J], sd = model[['sigmatoa']], y = model[['y']][nodeIndex,1:J], 1)
+
+		# n_currentValue <- sum(model[['ID']] == currentValue)
+		# if(n_currentValue == 1)
+		# {
+			# logProbs[currentValue] <<- logProbs[currentValue] + log(psi) - log(1-psi) - model[['Hk']][currentValue]
+			# model[['z']][currentValue] <<- 0
+		# }
+        # for(i in 1:k) {
+			# if(i != currentValue){
+				# model[[target]] <<- i
+				# if(model[['z']][i] == 1) {
+					# nk <- sum(model[['ID']] == i)
+					# if(nk == 0)
+					# {
+						# logProbs[i] <<- -Inf
+					# }else {
+						# logProbs[i] <<-  dbinom_vector(model[['y']][nodeIndex,1:J], size = size, model[['pkj']][i,1:J], 1) +
+							# dnorm_vector_marg(model[['toa']][nodeIndex, 1:J], mean = model[['expTime']][i,1:J], sd = model[['sigmatoa']], y = model[['y']][nodeIndex,1:J], 1)
+					# }
+				# }
+				# if(model[['z']][i] == 0){
+					# logProbs[i] <<- logProbs[i] + log(psi) - log(1-psi) - model[['Hk']][i]
+				# }
+				
+				# if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
+			# }
+        # }
+        # logProbs <<- logProbs - max(logProbs)
+        # probs <<- exp(logProbs)
+        # newValue <- rcat(1, probs)
+        # if(newValue != currentValue) {
+            # model[[target]] <<- newValue
+			# if(model[['z']][newValue] == 0){
+				# model[['z']][newValue] <<- 1
+				# model$calculate(calcNodesZ)
+			# }
+            # model$calculate(calcNodes)	# I've made ID independent of z so this shouldn't double.
+            # nimCopy(from = model, to = mvSaved, row = 1, nodes = c(target, 'z'), logProb = TRUE)
+            # nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
+            # nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
+        # } else {
+			# model[['z']][newValue] <<- 1
+            # nimCopy(from = mvSaved, to = model, row = 1, nodes = c(target, 'z'), logProb = TRUE)
+            # nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
+            # nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
+        # }
+    # },
+    # methods = list( reset = function() { } )
+# )
+
+# sampler_myIDZASCR2 <- nimbleFunction(
+    # name = 'sampler_myIDZASCR2',
+    # contains = sampler_BASE,
+    # setup = function(model, mvSaved, target, control) {
+        # calcNodes <- model$getDependencies(target)
+        # calcNodesNoSelf <- model$getDependencies(target, self = FALSE)
+        # isStochCalcNodesNoSelf <- model$isStoch(calcNodesNoSelf)
+        # calcNodesNoSelfDeterm <- calcNodesNoSelf[!isStochCalcNodesNoSelf]
+        # calcNodesNoSelfStoch <- calcNodesNoSelf[isStochCalcNodesNoSelf]
+		# nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', target))
+        # k <- control$M
+        # probs <- numeric(k)
+        # logProbs <- numeric(k)
+		# J <- control$J
+		# size <- rep(1, J)		
+    # },
+    # run = function() {
+		# psi <- model[['psi']]
+        # currentValue <- model[[target]]
+		# logProbs[currentValue] <<- dbinom_vector(model[['y']][nodeIndex,1:J], size = size, model[['pkj']][currentValue,1:J], 1) +
+			# dnorm_vector_marg(model[['toa']][nodeIndex, 1:J], mean = model[['expTime']][currentValue,1:J], sd = model[['sigmatoa']], y = model[['y']][nodeIndex,1:J], 1)
+        # for(i in 1:k) {
+			# if(i != currentValue){
+				# model[[target]] <<- i
+				# if(model[['z']][i] == 1) {
+					# nk <- sum(model[['ID']] == i)
+					# if(nk == 0)
+					# {
+						# logProbs[i] <<- -Inf
+					# }else {
+						# logProbs[i] <<-  dbinom_vector(model[['y']][nodeIndex,1:J], size = size, model[['pkj']][i,1:J], 1) +
+							# dnorm_vector_marg(model[['toa']][nodeIndex, 1:J], mean = model[['expTime']][i,1:J], sd = model[['sigmatoa']], y = model[['y']][nodeIndex,1:J], 1)
+					# }
+				# }else{
+					# logProbs[i] <<- -Inf
+				# }				
+				# if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
+			# }
+        # }
+        # logProbs <<- logProbs - max(logProbs)
+        # probs <<- exp(logProbs)
+        # newValue <- rcat(1, probs)
+        # if(newValue != currentValue) {
+            # model[[target]] <<- newValue
+            # model$calculate(calcNodes)	# I've made ID independent of z so this shouldn't double.
+            # nimCopy(from = model, to = mvSaved, row = 1, nodes = target, logProb = TRUE)
+            # nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
+            # nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
+        # } else {
+            # nimCopy(from = mvSaved, to = model, row = 1, nodes = target, logProb = TRUE)
+            # nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
+            # nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
+        # }
+    # },
+    # methods = list( reset = function() { } )
+# )
 

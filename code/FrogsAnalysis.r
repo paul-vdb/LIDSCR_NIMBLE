@@ -10,7 +10,7 @@ library(raster)
 library(nimble)
 library(nimbleSCR)
 library(coda)
-
+library(ggplot2)
 
 source("NimbleFunctions.R")
 source("SimData.R")
@@ -39,12 +39,12 @@ inits <- function(){
 		mpt <- sample(ncol(panimal), 1, prob = exp(pID))
 		X[i,] <- mask[mpt,]
 	}
-
+	sigmatoa = runif(1, 0.8, 1)
 	list(
         lambda = lambda,
         psi = p,
         sigma = sigma,
-		sigmatoa = runif(1, 0.8, 1),
+		sigmatoa = sigmatoa,
 		lam0 = lam0,
 		X=X,
 		ID = ID,
@@ -75,12 +75,14 @@ initsTRUE <- function(){
 		mpt <- sample(ncol(panimal), 1, prob = exp(pID))
 		X[i,] <- mask[mpt,]
 	}
+	
+	sigmatoa = 0.002
 
 	list(
         lambda = lambda,
         psi = p,
         sigma = sigma,
-		sigmatoa = 0.002,
+		sigmatoa = sigmatoa,
 		lam0 = lam0,
 		X=X,
 		ID = ID,
@@ -93,8 +95,8 @@ code <- nimbleCode({
     psi ~ dbeta(1, 1)      # Prior on data augmentation bernoulli vec.
     sigma ~ dunif(0, 10)	# Now the prior is directly on sigma to be consistent with literature.
     tau2 <- 1/(2*sigma^2)
-	# sigmatoa <- sqrt(sigmatoa2)
 	sigmatoa ~ dunif(0,1)
+	# sigmatoa <- 0.001
 	lam0 ~ dunif(0, 20)
     for(i in 1:M) {
         z[i] ~ dbern(psi)
@@ -103,7 +105,7 @@ code <- nimbleCode({
 		# X[i, 1:2] ~ dX()
         d2[i,1:J] <- (X[i,1]-traps[1:J,1])^2 + (X[i,2]-traps[1:J,2])^2
 		expTime[i,1:J] <- sqrt(d2[i,1:J])/nu
-        # pkj[i,1:J] <- exp(-d2[i,1:J]*tau2)*z[i]
+        # pkj[i,1:J] <- lam0*exp(-d2[i,1:J]*tau2)
         pkj[i,1:J] <- (1-exp(-lam0*exp(-d2[i,1:J]*tau2)))
         # Hazard rate for animal across all traps.
         Hk[i] <- (1-prod(1-pkj[i,1:J]))*lambda*Time
@@ -135,6 +137,7 @@ toa <- toa[keep,]
 ID <- capt.all$bincapt[, 7]
 ID <- ID[keep]
 ID <- as.integer(as.factor(ID))
+IDBen <- ID
 capt <- capt.all$bincapt[,1:6]
 capt <- capt[keep,]
 
@@ -166,21 +169,24 @@ data <- list(
 	toa = toa,
 	z = rep(NA, M),
 	ID = rep(NA, nrow(capt))
+	# ID = IDBen
 )
 
 Rmodel <- nimbleModel(code, constants, data, inits = initsTRUE())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'lam0', 'Nhat', 'D'))
+conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'lam0', 'Nhat', 'D', 'ID', 'z', 'X'))
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
 for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE)
 
-conf$removeSamplers(c('sigma', 'lam0'))
-conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
+# conf$removeSamplers(c('sigma', 'lam0'))
+# conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
 
+conf$removeSamplers('sigmatoa')
+conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
 
 # conf$printSamplers()
 
@@ -190,6 +196,7 @@ conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
 conf$removeSamplers('ID')
 # conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
 conf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M = M))
+# conf$addSampler('ID', type = 'myIDZASCR2', scalarComponents = TRUE, control = list(M = M, J = J))
 
 # conf$printSamplers()
 
@@ -198,86 +205,14 @@ Rmcmc <- buildMCMC(conf)
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-Cmcmc$run(5000)
+Cmcmc$run(10000)
 mvSamples <- Cmcmc$mvSamples
 samples <- as.matrix(mvSamples)
 out <- mcmc(samples[-(1:2500),])
 plot(out[, c("lambda", "sigmatoa", "Nhat")])
 plot(out[, c("sigma", "lam0")])
 
-# samples <- runMCMC(Cmcmc, niter = 10000, nburnin = 5000, nchains = 1, thin = 3, inits = initsTRUE())
-# out <- as.mcmc(samples)
-samples <- runMCMC(Cmcmc, niter = 20000, nburnin = 10000, nchains = 3, thin = 1, inits = list(inits(), inits(), inits()))
-out <- mcmc.list(list(as.mcmc(samples[[1]]), as.mcmc(samples[[2]]), as.mcmc(samples[[3]])))
-plot(out[,1:3])
-dev.new()
-plot(out[,4:6])
-save(out, file = "frog_unmarked.rda")
-d <- seq(0, 10, by = 0.1)
-plot(d, (1-exp(-3.6*exp(-d^2/(2*2.9)))))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# save(out, file = "FrogsUnmarked.Rda")
-# library(coda)
-# load("FrogsUnmarked.Rda")
-
-# samples <- runMCMC(Cmcmc, niter = 5000, nburnin = 1000, nchains = 1, thin = 1, inits =inits())
-# out <- mcmc(samples)
-# plot(out[,1:3])
-# dev.new()
-# plot(out[,4:6])
-plot(out[,grep("sigma|lambda|lam0", colnames(out))], ask = TRUE)
-plot(out[,grep("N", colnames(out))], ask = TRUE)
-
-
-ID.ord <- ID[order(ID)]
-
-# id <- do.call("rbind", lapply(out, FUN = function(x){x[,grep("ID", colnames(x))]}))
-id <- out[,grep("ID", colnames(out))]
-id.ord <- id[, order(ID)]
-idmatch <- matrix(0, ncol(id), ncol(id))
-for(i in 1:nrow(id))
-{
-	idmatch <- idmatch + outer(id.ord[i,], id.ord[i,], '==')*1
-}
-idmatch <- idmatch/nrow(id)
-library(corrplot)
-
-id.true <- outer(ID.ord, ID.ord, '==')*1
-ncount <- matrix(0, ncol(id), ncol(id)) + (rowSums(capt[order(ID),])>2)*diag(ncol(id))
-
-corrplot(ncount, method="color",  tl.pos='n')
-
-
-corrplot(idmatch, method="color", type = "lower", tl.pos='n', diag = FALSE)		
-corrplot(id.true, method="color", type = "upper", tl.pos='n', add = TRUE, diag = FALSE)
-
-rowSums(capt[order(ID),])
-
-
-# save(samples, file = "FrogsUnmarkedX.Rda")
-load("FrogsUnmarkedX.Rda")
+# Demonstrate the problem:
 post.x <- samples[-(1:5000),grep("X", colnames(samples))]
 post.x1 <- post.x[,grep("1]", colnames(post.x))]
 post.x2 <- post.x[,grep("2]", colnames(post.x))]
@@ -289,8 +224,8 @@ ID <- ID[keep]
 ID <- as.integer(as.factor(ID))
 x1 <- data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,1])], y= post.x2[cbind(1:nrow(post.id), post.id[,1])])
 x14 <-  data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,14])], y= post.x2[cbind(1:nrow(post.id), post.id[,14])])
-library(ggplot2)
 
+# This is two obvious detections that should be matched and it is working great.
 ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) + 
 	theme_classic() + geom_point(data = x1, aes(x=x, y=y), col = "red", alpha = 0.1) + 
 	geom_point(data = x14, aes(x=x, y=y), col = "blue", alpha = 0.1) + 
@@ -299,15 +234,16 @@ ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) +
 sum(post.id[,1] == post.id[,14])/nrow(post.id)
 
 
+# These are two not so obvious mathces that may actually not match 
+# but they should certainly not look like they do below.
+# This doesn't match with the posterior call location of an animal heard at a single trap at all.
+# I can't make any sense of why this matching would be sooo bad.
 x78 <- data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,78])], y= post.x2[cbind(1:nrow(post.id), post.id[,78])])
 x85 <-  data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,85])], y= post.x2[cbind(1:nrow(post.id), post.id[,85])])
-	
+
 ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) + 
 	theme_classic() + geom_point(data = x78, aes(x=x, y=y), col = "red", alpha = 0.1) + 
 	geom_point(data = x85, aes(x=x, y=y), col = "blue", alpha = 0.1) +
 	geom_point(data = data.frame(traps)[capt[78,] == 1, ], aes(x=x,y=y), shape = 2, col = "red", size= 3) +
 	geom_point(data = data.frame(traps)[capt[85,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)
 sum(post.id[,78] == post.id[,85])/nrow(post.id)
-
-
-

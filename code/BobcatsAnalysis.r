@@ -136,7 +136,7 @@ Rmodel <- nimbleModel(code, constants, data, inits = inits())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('sigma', 'lambda', 'psi', 'Nhat', 'sigma_scaled'))
+conf$setMonitors(c('sigma', 'lambda', 'lam', 'psi', 'Nhat', 'sigma_scaled'))
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = limits$xlim, ylim = limits$ylim, J = nrow(traps)))
@@ -178,7 +178,7 @@ Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 samples <- runMCMC(Cmcmc, niter = 10000, nburnin = 5000, nchains = 3, thin = 1, inits = list(inits(), inits(), inits()))
 out <- mcmc.list(list(as.mcmc(samples[[1]]), as.mcmc(samples[[2]]), as.mcmc(samples[[3]])))
 plot(out[, c("Nhat", "sigma_scaled", "lambda")])
-
+summary(out)
 
 indx <- grep('ID', colnames(samps))
 id.out <- samps[, indx]
