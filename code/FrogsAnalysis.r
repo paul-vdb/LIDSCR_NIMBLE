@@ -208,7 +208,7 @@ Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 Cmcmc$run(10000)
 mvSamples <- Cmcmc$mvSamples
 samples <- as.matrix(mvSamples)
-out <- mcmc(samples[-(1:2500),])
+out <- mcmc(samples[-(1:5000),])
 plot(out[, c("lambda", "sigmatoa", "Nhat")])
 plot(out[, c("sigma", "lam0")])
 
