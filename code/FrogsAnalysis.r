@@ -180,13 +180,14 @@ conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'lam0', 'Nhat', 'D', 'ID', 'z'
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
-for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE)
+for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 1, adaptive = FALSE))
 
 # conf$removeSamplers(c('sigma', 'lam0'))
 # conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
 
 conf$removeSamplers('sigmatoa')
 conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
+# conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt)))
 
 # conf$printSamplers()
 
@@ -211,6 +212,7 @@ samples <- as.matrix(mvSamples)
 out <- mcmc(samples[-(1:5000),])
 plot(out[, c("lambda", "sigmatoa", "Nhat")])
 plot(out[, c("sigma", "lam0")])
+plot(out[, c("D", "Nhat")])
 
 # Demonstrate the problem:
 post.x <- samples[-(1:5000),grep("X", colnames(samples))]
@@ -218,6 +220,8 @@ post.x1 <- post.x[,grep("1]", colnames(post.x))]
 post.x2 <- post.x[,grep("2]", colnames(post.x))]
 
 post.id <- samples[-(1:5000),grep("ID", colnames(samples))]
+NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
+hist(NActive)
 
 ID <- capt.all$bincapt[, 7]
 ID <- ID[keep]
@@ -247,3 +251,34 @@ ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) +
 	geom_point(data = data.frame(traps)[capt[78,] == 1, ], aes(x=x,y=y), shape = 2, col = "red", size= 3) +
 	geom_point(data = data.frame(traps)[capt[85,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)
 sum(post.id[,78] == post.id[,85])/nrow(post.id)
+
+Rmodel$sigmatoa <- 0.0003
+Rmodel$calculate()
+
+target <- 'ID[78]'
+logprobs <- numeric(M)
+calcNodes <- Rmodel$getDependencies(target)
+for(i in 1:M)
+{
+	Rmodel[[target]] <- i
+	logprobs[i] <- Rmodel$calculate(calcNodes)
+}
+p <- exp(logprobs - max(logprobs))
+ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) + 
+	theme_classic() + geom_point(data = data.frame(Rmodel$X), 
+		aes(x=X1, y=X2, colour = p))
+
+
+# Check the X Sampler?
+calcNodes <- Rmodel$getDependencies("X[1,1:2]")
+x0 <- Rmodel$calculate(calcNodes)
+toas <- paste0("toa[", which(Rmodel$ID == 1), ",1:6]")
+ys <- paste0("y[", which(Rmodel$ID == 1), ",1:6]")
+ll0 <- Rmodel$calculate(toas) +  Rmodel$calculate(ys) - Rmodel$Hk[1]
+Rmodel$X[1,1:2] <- c(rnorm(1, Rmodel$X[1,1], 0.001)  ,rnorm(1, Rmodel$X[1,2], 0.001))
+x1 <- Rmodel$calculate(calcNodes)
+ll1 <- Rmodel$calculate(toas) +  Rmodel$calculate(ys) - Rmodel$Hk[1]
+# SAME THAT"S GOOD....
+x0 - x1
+ll0 - ll1
+

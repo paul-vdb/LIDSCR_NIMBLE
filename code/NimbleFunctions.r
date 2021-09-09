@@ -95,6 +95,7 @@ registerDistributions(
 				   types = c('value = double(1)', 'mean = double(1)', 'sd = double(0)', 'y = double(1)'))		   
 				   ) )
 
+
 sampler_myX <- nimbleFunction(
     name = 'sampler_myX',
     contains = sampler_BASE,
@@ -497,5 +498,30 @@ sampler_mySPIM <- nimbleFunction(
         # }
     # },
     # methods = list( reset = function() { } )
+# )
+# sampler_mySigmaToa <- nimbleFunction(
+    # name = 'sampler_mySigmaToa',
+    # contains = sampler_BASE,
+    # setup = function(model, mvSaved, target, control) {
+        # calcNodesAll <- model$getDependencies(target)
+		# mi <- control$mi
+		# n <- length(model[['ID']])
+		# tdiff <- numeric(6)
+    # },
+    # run = function() {
+		# ssq <- 0
+		# mdiff <- 0
+		# for(i in 1:n){
+			# if(mi[i] > 1){
+				# tdiff <- (model[['toa']][i,1:6] - model[['expTime']][model[['ID']][i],1:6])*model[['y']][i,1:6]
+				# mdiff <- sum(tdiff[1:6])/mi[i]
+				# ssq <- ssq + sum(model[['y']][i,1:6]*(tdiff[1:6] - mdiff)^2)
+			# }
+		# }
+	# model[[target]]	<<- sqrt(rgamma(1, shape = sum((mi-1)/2), scale = ssq/2))
+	# model$calculate(calcNodesAll)
+	# nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesAll, logProb = TRUE)
+    # },
+    # methods = list( reset = function() {} )
 # )
 
