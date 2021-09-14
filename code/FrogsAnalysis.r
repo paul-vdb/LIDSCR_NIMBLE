@@ -148,7 +148,8 @@ J <- nrow(traps)
 n <- nrow(capt)
 Time <- 30
 mint <- min(toa[toa != 0])
-toa[toa != 0]<- toa[toa != 0] - mint + 1	# That add one is to make sure they can't go negative for time of calling.
+toa<- toa - mint + 1	# That add one is to make sure they can't go negative for time of calling.
+toa <- toa*capt
 tmink <- tmin[keep] - mint
 
 constants <- list(
@@ -180,7 +181,10 @@ conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'lam0', 'Nhat', 'D', 'ID', 'z'
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
-for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 1, adaptive = FALSE))
+# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 2, adaptive = FALSE))
+for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
+	control = list(xlim = xlim, ylim = ylim, scale = 1, J = nrow(traps)))
+
 
 # conf$removeSamplers(c('sigma', 'lam0'))
 # conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
@@ -203,6 +207,9 @@ conf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M 
 
 Rmcmc <- buildMCMC(conf)
 
+# debug(Rmcmc$samplerFunctions[[408]]$run)
+# Rmcmc$run(10)
+
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
@@ -210,9 +217,11 @@ Cmcmc$run(10000)
 mvSamples <- Cmcmc$mvSamples
 samples <- as.matrix(mvSamples)
 out <- mcmc(samples[-(1:5000),])
-plot(out[, c("lambda", "sigmatoa", "Nhat")])
+plot(out[, c("lambda", "sigmatoa")])
 plot(out[, c("sigma", "lam0")])
 plot(out[, c("D", "Nhat")])
+summary(out[, c("D", "Nhat")])
+summary(out[, c("lambda", "sigmatoa")])
 
 # Demonstrate the problem:
 post.x <- samples[-(1:5000),grep("X", colnames(samples))]
@@ -252,6 +261,7 @@ ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) +
 	geom_point(data = data.frame(traps)[capt[85,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)
 sum(post.id[,78] == post.id[,85])/nrow(post.id)
 
+
 Rmodel$sigmatoa <- 0.0003
 Rmodel$calculate()
 
@@ -282,3 +292,15 @@ ll1 <- Rmodel$calculate(toas) +  Rmodel$calculate(ys) - Rmodel$Hk[1]
 x0 - x1
 ll0 - ll1
 
+# Show Mask info:
+ind <- 85
+summary(out)
+dmask2 <- t(apply(mask, 1, FUN = function(x){(traps[,1]-x[1])^2 + (traps[,2] - x[2])^2}))
+pkj <- (1-exp(-5.8*exp(-dmask2/(2*2.65^2))))
+pcapt <- apply(pkj, 1, FUN = function(x){dbinom_vector(capt[ind,], size = rep(1,J),x)})
+pos <- (pcapt > exp(-5))*1
+p <- 1-rowProd(1-pkj)
+ggplot(data = data.frame(mask), aes(x=x,y=y)) + geom_tile(aes(fill=pos*exp(-p*0.4081*Time))) + 
+	geom_point(data = data.frame(traps), aes(x=x,y=y), shape = 16, col = "red", size= 3) + 
+	geom_point(data = data.frame(traps)[capt[ind,]==1,], aes(x=x,y=y), shape = 16, col = "green", size= 3) + 
+	geom_point(data = x85, aes(x=x, y=y), col = "purple", alpha = 0.1)

@@ -148,6 +148,44 @@ sampler_myX <- nimbleFunction(
     methods = list( reset = function() {} )
 )
 
+sampler_myX2 <- nimbleFunction(
+    name = 'sampler_myX2',
+    contains = sampler_BASE,
+    setup = function(model, mvSaved, target, control) {
+        xlim <- control$xlim
+        ylim <- control$ylim
+        calcNodesAll <- model$getDependencies(target)
+        nodeIndex <- as.numeric(gsub("\\D*(\\d+).*", '\\1', target))
+        zNode <- paste0('z[', nodeIndex, ']')
+		scale <- control$scale
+    },
+    run = function() {
+		lpcurrent <- model$getLogProb(calcNodesAll)	
+		XCurrent <- model[[target]]	
+        model[[target]] <<- XCurrent + rnorm(2, 0, sd = scale)
+		prior <- model$calculate(target)
+		if(prior == -Inf)
+		{
+			jump <- FALSE
+		}else{
+			if((model[[zNode]] == 0)) {
+				jump <- TRUE
+            }else {
+				lpprop <- model$calculate(calcNodesAll)
+				logMHR <- lpprop - lpcurrent
+				jump <- decide(logMHR)
+			}
+		}
+		if(jump) {
+				nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesAll, logProb = TRUE)
+		} else {
+				nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesAll, logProb = TRUE)
+		}
+    },
+    methods = list( reset = function() {} )
+)
+
+
 sampler_myBinary <- nimbleFunction(
     name = 'sampler_myBinary',
     contains = sampler_BASE,
@@ -238,8 +276,12 @@ sampler_myIDZ <- nimbleFunction(
         k <- control$M
         probs <- numeric(k)
         logProbs <- numeric(k)
+	    nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', target))
+		# check <- paste0("y[", nodeIndex,",1:6]")
+		count <- 0
     },
     run = function() {
+		count <<- count+1
 		psi <- model[['psi']]
         currentValue <- model[[target]]
 		logProbs[currentValue] <<- model$getLogProb(calcNodes)
@@ -273,11 +315,14 @@ sampler_myIDZ <- nimbleFunction(
         newValue <- rcat(1, probs)
         if(newValue != currentValue) {
             model[[target]] <<- newValue
+            model$calculate(calcNodes)	# I've made ID independent of z so this shouldn't double.			
+			# if(count %% 100 == 0 & nodeIndex == 85) {
+				# print(model$getLogProb(check))	# REMOVE LATER
+			# }
 			if(model[['z']][newValue] == 0){
 				model[['z']][newValue] <<- 1
 				model$calculate(calcNodesZ)
 			}
-            model$calculate(calcNodes)	# I've made ID independent of z so this shouldn't double.
             nimCopy(from = model, to = mvSaved, row = 1, nodes = c(target, 'z'), logProb = TRUE)
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
