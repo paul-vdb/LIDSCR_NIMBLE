@@ -163,16 +163,17 @@ sampler_myX2 <- nimbleFunction(
 		lpcurrent <- model$getLogProb(calcNodesAll)	
 		XCurrent <- model[[target]]	
         model[[target]] <<- XCurrent + rnorm(2, 0, sd = scale)
-		prior <- model$calculate(target)
+		prior <- model$calculateDiff(target)
 		if(prior == -Inf)
 		{
 			jump <- FALSE
 		}else{
 			if((model[[zNode]] == 0)) {
+				model$calculate(calcNodesAll)
 				jump <- TRUE
             }else {
 				lpprop <- model$calculate(calcNodesAll)
-				logMHR <- lpprop - lpcurrent
+				logMHR <- lpprop - lpcurrent + prior
 				jump <- decide(logMHR)
 			}
 		}
@@ -544,29 +545,30 @@ sampler_mySPIM <- nimbleFunction(
     # },
     # methods = list( reset = function() { } )
 # )
-# sampler_mySigmaToa <- nimbleFunction(
-    # name = 'sampler_mySigmaToa',
-    # contains = sampler_BASE,
-    # setup = function(model, mvSaved, target, control) {
-        # calcNodesAll <- model$getDependencies(target)
-		# mi <- control$mi
-		# n <- length(model[['ID']])
-		# tdiff <- numeric(6)
-    # },
-    # run = function() {
-		# ssq <- 0
-		# mdiff <- 0
-		# for(i in 1:n){
-			# if(mi[i] > 1){
-				# tdiff <- (model[['toa']][i,1:6] - model[['expTime']][model[['ID']][i],1:6])*model[['y']][i,1:6]
-				# mdiff <- sum(tdiff[1:6])/mi[i]
-				# ssq <- ssq + sum(model[['y']][i,1:6]*(tdiff[1:6] - mdiff)^2)
-			# }
-		# }
-	# model[[target]]	<<- sqrt(rgamma(1, shape = sum((mi-1)/2), scale = ssq/2))
-	# model$calculate(calcNodesAll)
-	# nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesAll, logProb = TRUE)
-    # },
-    # methods = list( reset = function() {} )
-# )
+sampler_mySigmaToa <- nimbleFunction(
+    name = 'sampler_mySigmaToa',
+    contains = sampler_BASE,
+    setup = function(model, mvSaved, target, control) {
+        calcNodesAll <- model$getDependencies(target)
+		mi <- control$mi
+		n <- length(mi)
+		J <- control$J
+    },
+    run = function() {
+		ssq <- 0
+		mdiff <- 0
+		tdiff <- numeric(J)
+		for(i in 1:n){
+			if(mi[i] > 1){
+				tdiff <- (model[['toa']][i,1:J] - model[['expTime']][model[['ID']][i],1:J])*model[['y']][i,1:J]
+				mdiff <- sum(tdiff[1:J])/mi[i]
+				ssq <- ssq + sum(model[['y']][i,1:J]*(tdiff[1:J] - mdiff)^2)
+			}
+		}
+	model[[target]]	<<- sqrt(rgamma(1, shape = sum((mi-1)/2), scale = ssq/2))
+	model$calculate(calcNodesAll)
+	nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesAll, logProb = TRUE)
+    },
+    methods = list( reset = function() {} )
+)
 

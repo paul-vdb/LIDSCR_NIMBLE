@@ -95,8 +95,8 @@ code <- nimbleCode({
     psi ~ dbeta(1, 1)      # Prior on data augmentation bernoulli vec.
     sigma ~ dunif(0, 10)	# Now the prior is directly on sigma to be consistent with literature.
     tau2 <- 1/(2*sigma^2)
-	sigmatoa ~ dunif(0,1)
-	# sigmatoa <- 0.001
+	tautoa ~ dunif(0,100000)
+	sigmatoa <- 1/sqrt(tautoa)
 	lam0 ~ dunif(0, 20)
     for(i in 1:M) {
         z[i] ~ dbern(psi)
@@ -189,9 +189,9 @@ for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sample
 # conf$removeSamplers(c('sigma', 'lam0'))
 # conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
 
-conf$removeSamplers('sigmatoa')
-conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
-# conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt)))
+# conf$removeSamplers('sigmatoa')
+# conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
+# conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
 
 # conf$printSamplers()
 
@@ -279,18 +279,10 @@ ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) +
 		aes(x=X1, y=X2, colour = p))
 
 
-# Check the X Sampler?
-calcNodes <- Rmodel$getDependencies("X[1,1:2]")
-x0 <- Rmodel$calculate(calcNodes)
-toas <- paste0("toa[", which(Rmodel$ID == 1), ",1:6]")
-ys <- paste0("y[", which(Rmodel$ID == 1), ",1:6]")
-ll0 <- Rmodel$calculate(toas) +  Rmodel$calculate(ys) - Rmodel$Hk[1]
-Rmodel$X[1,1:2] <- c(rnorm(1, Rmodel$X[1,1], 0.001)  ,rnorm(1, Rmodel$X[1,2], 0.001))
-x1 <- Rmodel$calculate(calcNodes)
-ll1 <- Rmodel$calculate(toas) +  Rmodel$calculate(ys) - Rmodel$Hk[1]
-# SAME THAT"S GOOD....
-x0 - x1
-ll0 - ll1
+# Is there ever a z = 0 with an ID.
+ids <- samples[,grep("ID", colnames(samples))]
+zs <- samples[,grep("z", colnames(samples))]
+ones <- do.call('rbind', lapply(1:nrow(ids), FUN = function(x){zs[x, ids[x,]]}))
 
 # Show Mask info:
 ind <- 85
