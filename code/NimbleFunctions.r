@@ -84,6 +84,30 @@ rbinom_vector_ascr <- nimbleFunction(
     return(rbinom(length(size), prob = prob, size = size))
   })
 
+
+dMarg <- nimbleFunction(
+  run = function( x = double(0),
+				  toa = double(1),
+				  y = double(1),
+				  J = double(0),
+                  size = double(1),
+                  pkj = double(2),
+				  sd = double(0),
+				  expTime = double(2),
+				  M = double(0),
+                  log = integer(0, default = 0)
+                  ) {
+    returnType(double(0))
+		likelihood <- 0
+		for(k in 1:M) {
+			lpcapt <- dbinom_vector(x = y, size = size, prob = pkj[k,1:J], log = 1)
+			lptoa <- dnorm_vector_marg(x = toa, mean = expTime[k,1:J], sd = sd, y = y, log = 1)
+			likelihood <- likelihood + exp(lptoa + lpcapt)
+		}
+    if(log) return(log(likelihood)) else return(likelihood)
+  })
+
+
 registerDistributions(
     list(dX = list(BUGSdist = 'dX()',
                    types = c('value = double(1)')),
@@ -160,18 +184,20 @@ sampler_myX2 <- nimbleFunction(
 		scale <- control$scale
     },
     run = function() {
-		lpcurrent <- model$getLogProb(calcNodesAll)	
-		XCurrent <- model[[target]]	
-        model[[target]] <<- XCurrent + rnorm(2, 0, sd = scale)
-		prior <- model$calculateDiff(target)
-		if(prior == -Inf)
-		{
-			jump <- FALSE
-		}else{
-			if((model[[zNode]] == 0)) {
+		if((model[[zNode]] == 0)) {
+				model[[target]] <<- c(runif(1, xlim[1],xlim[2]), runif(1, ylim[1], ylim[2]))
 				model$calculate(calcNodesAll)
 				jump <- TRUE
-            }else {
+        }else {
+			lpcurrent <- model$getLogProb(calcNodesAll)	
+			XCurrent <- model[[target]]	
+			model[[target]] <<- XCurrent + rnorm(2, 0, sd = scale)
+			prior <- model$calculateDiff(target)
+			if(prior == -Inf)
+			{
+				jump <- FALSE
+			}else{
+				
 				lpprop <- model$calculate(calcNodesAll)
 				logMHR <- lpprop - lpcurrent + prior
 				jump <- decide(logMHR)
@@ -555,6 +581,7 @@ sampler_mySigmaToa <- nimbleFunction(
 		J <- control$J
     },
     run = function() {
+		alpha <- 1
 		ssq <- 0
 		mdiff <- 0
 		tdiff <- numeric(J)
@@ -563,9 +590,10 @@ sampler_mySigmaToa <- nimbleFunction(
 				tdiff <- (model[['toa']][i,1:J] - model[['expTime']][model[['ID']][i],1:J])*model[['y']][i,1:J]
 				mdiff <- sum(tdiff[1:J])/mi[i]
 				ssq <- ssq + sum(model[['y']][i,1:J]*(tdiff[1:J] - mdiff)^2)
+				alpha = alpha + (mi[i]-1)/2
 			}
 		}
-	model[[target]]	<<- sqrt(rgamma(1, shape = sum((mi-1)/2), scale = ssq/2))
+	model[[target]]	<<- 1/sqrt(rgamma(1, shape = alpha, rate = ssq/2))
 	model$calculate(calcNodesAll)
 	nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesAll, logProb = TRUE)
     },
