@@ -305,38 +305,37 @@ sampler_myIDZ <- nimbleFunction(
         logProbs <- numeric(k)
 	    nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', target))
 		# check <- paste0("y[", nodeIndex,",1:6]")
-		count <- 0
+		# count <- 0
+		zAdjust <- numeric(k)
     },
     run = function() {
-		count <<- count+1
+		# count <<- count+1
 		psi <- model[['psi']]
         currentValue <- model[[target]]
 		logProbs[currentValue] <<- model$getLogProb(calcNodes)
 		n_currentValue <- sum(model[['ID']] == currentValue)
 		if(n_currentValue == 1)
 		{
-			logProbs[currentValue] <<- logProbs[currentValue] + log(psi) - log(1-psi) - model[['Hk']][currentValue]
+			zAdjust[currentValue] <<- 1
 			model[['z']][currentValue] <<- 0
 		}
         for(i in 1:k) {
 			if(i != currentValue){
-				if(model[['z']][i] == 1) {
-					nk <- sum(model[['ID']] == i)
-					if(nk == 0)
-					{
-						logProbs[i] <<- -Inf
-					}else { 
-						model[[target]] <<- i
-						logProbs[i] <<- model$calculate(calcNodes)
-						if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
-					}
+				if((sum(model[['ID']] == i) == 0 & model[['z']][i] == 1))
+				{
+					logProbs[i] <<- -Inf
+					zAdjust[i] <<- 0
 				}else {
 					model[[target]] <<- i
-					logProbs[i] <<- model$calculate(calcNodes) + log(psi) - log(1-psi) - model[['Hk']][i]
+					logProbs[i] <<- model$calculate(calcNodes)
 					if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
+					
+					# Keep track of which ones are existing or not.
+					zAdjust[i] <<- 1-model[['z']][i]
 				}
-            }
+			}
         }
+		logProbs <<- logProbs + (1-zAdjust)*log(1-psi) + zAdjust*(log(psi)-model[['Hk']])
         logProbs <<- logProbs - max(logProbs)
         probs <<- exp(logProbs)
         newValue <- rcat(1, probs)

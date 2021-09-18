@@ -195,9 +195,9 @@ for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sample
 # conf$removeSamplers(c('sigma', 'lam0'))
 # conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
 
-conf$removeSamplers('sigmatoa')
+# conf$removeSamplers('sigmatoa')
 # conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
-conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
+# conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
 
 # conf$printSamplers()
 

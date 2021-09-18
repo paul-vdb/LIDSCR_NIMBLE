@@ -125,7 +125,7 @@ SC_MPP <- nimbleCode({
     for(i in 1:n_obs) {
         # trap probability given ID:
         # This one can certainly be just the ones trick for trap y[i].
-		pobs[i] <- hkj[ID[i], omega[i]] + 0.0000000001
+		pobs[i] <- hkj[ID[i], omega[i]]
         ones[i] ~ dbern(pobs[i])
 		ID[i] ~ dID()	# Dummy distribution to declare this as stochastic.
     }
@@ -164,10 +164,12 @@ for(i in 1:M) SCconf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_b
 SCRmcmc <- buildMCMC(SCconf)
 SCCmodel <- compileNimble(SCModel)
 SCCmcmc <- compileNimble(SCRmcmc, project = SCModel)
-samples.sc <- runMCMC(SCCmcmc, 20000, nburnin = 10000, nchains = 3, thin = 1)
+samples.sc <- runMCMC(SCCmcmc, 30000, nburnin = 10000, nchains = 3, thin = 1)
 
 out.sc <- mcmc.list(list(as.mcmc(samples.sc[[1]]), as.mcmc(samples.sc[[2]]), as.mcmc(samples.sc[[3]])))
 plot(out.sc[,c("N", "sigma", "lambda", "psi")])
+# save(out.sc, file = "../output/fisher_sc.Rda")
+# load("../output/fisher_sc.Rda")
 
 # Run the same model from van Dam-Bates et al. Marked Poisson Process on fisher.
 #----------------------------------------------------------------------
@@ -192,16 +194,23 @@ data.mpp <- list(
 
 # Need to initialize this model as the stochastic node for ID is kind of wrong...
 inits <- function(){
-    p <- runif(1, 0.1, 0.7)
-    K <- rbinom(1, M, p)
+	lambda <- runif(1, 0.1, 1)
+	sigma <- runif(1, 0.5, 2)
+	X <- cbind(runif(M, xlim[1], xlim[2]), 
+			  runif(M, ylim[1], ylim[2]))
+	d2 <- t(apply(X, 1, FUN = function(x){(x[1] - traps[,1])^2 + (x[2] - traps[,2])^2}))
+	hkj <- lambda*exp(-d2/(2*sigma^2))
+	ID <- do.call('c', lapply(omega, FUN = function(x) {sample(1:M, 1, prob = hkj[,x])}))
+	z <- rep(0, M)
+	z[ID] <- 1
+	psi <- length(unique(ID))/M
 	list(
-        lambda = runif(1, 0.1, 2),
-        psi = p,
-        sigma = runif(1, 0.1, 1.5),
-        X = cbind(runif(M, xlim[1], xlim[2]), 
-                  runif(M, ylim[1], ylim[2])),
-		ID = sample(K, length(omega), replace = TRUE),
-        z = c(rep(1,K), rep(0, M-K))
+		lambda = lambda,
+		sigma = sigma,
+		psi = psi,
+		X = X,
+		z = z,
+		ID = ID
     )
 }
 
@@ -211,20 +220,36 @@ MPPconf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D'))
 # Use a block update on locations. Saves time.
 # Turn off adaptive samping and fix the scale of the sampler to something reasonable.
 MPPconf$removeSamplers('X')
-for(i in 1:M){ 
-	SCconf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', 
-		silent = TRUE, control = list(adaptive = FALSE, scale = 0.5))
-	}
+# for(i in 1:M){ 
+	# SCconf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', 
+		# silent = TRUE, control = list(adaptive = FALSE, scale = 0.5))
+	# }
+for(i in 1:M){ MPPconf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
+	control = list(xlim = xlim, ylim = ylim, scale = 0.5, J = nrow(traps)))}	
 # Optimized z sampler
 MPPconf$removeSamplers('z')
 MPPconf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
 # van Dam-Bates categorical sampler
 MPPconf$removeSamplers('ID')
+# Chandler and Royle Alg. 1 sampler.
+# MPPconf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
+# van Dam-Bates Alg.
 MPPconf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M = M))
 MPPRmcmc <- buildMCMC(MPPconf)
 MPPCmodel <- compileNimble(MPPModel)
 MPPCmcmc <- compileNimble(MPPRmcmc, project = MPPModel)
-samples.mpp <- runMCMC(MPPCmcmc, 30000, nburnin = 10000, nchains = 3, thin = 1, inits = list(inits(), inits(), inits()))
 
+# MPPCmcmc$run(1000)
+# mvSamples <- MPPCmcmc$mvSamples
+# samples <- as.matrix(mvSamples)
+# out <- mcmc(samples)
+# plot(out)
+
+samples.mpp <- runMCMC(MPPCmcmc, 30000, nburnin = 10000, nchains = 3, 
+	thin = 1, inits = list(inits(), inits(), inits()))
 out.mpp <- mcmc.list(list(as.mcmc(samples.mpp[[1]]), as.mcmc(samples.mpp[[2]]), as.mcmc(samples.mpp[[3]])))
-plot(out.mpp[,c("N", "sigma", "lambda", "psi")])
+# save(out.mpp, file = "../output/fisher_mpp.Rda")
+# load("../output/fisher_mpp.Rda")
+plot(out.mpp[,c("D", "sigma", "lambda")])
+dev.new()
+plot(out.sc[,c("D", "sigma", "lambda")])
