@@ -189,7 +189,7 @@ conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 0.05, adaptive = FALSE))
 for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
-	control = list(xlim = xlim, ylim = ylim, scale = 0.05, J = nrow(traps)))
+	control = list(xlim = xlim, ylim = ylim, scale = 0.5, J = nrow(traps)))
 
 
 # conf$removeSamplers(c('sigma', 'lam0'))
@@ -222,7 +222,7 @@ Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 Cmcmc$run(10000)
 mvSamples <- Cmcmc$mvSamples
 samples <- as.matrix(mvSamples)
-out <- mcmc(samples[-(1:5000),])
+out <- mcmc(samples)
 plot(out[, c("lambda", "sigmatoa")])
 plot(out[, c("sigma", "lam0")])
 plot(out[, c("D", "Nhat")])
