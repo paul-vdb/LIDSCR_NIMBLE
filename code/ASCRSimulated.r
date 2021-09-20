@@ -18,6 +18,8 @@ source("SimData.R")
 
 
 load("../data/stacked-lightfooti.Rdata")
+dat <- simASCR(N = 50, sigma = 2.2, sigma_toa = 0.001, g0 = 7.5, lambda = 0.3, StudyPeriod = 30, 
+	traps = traps, limits = list(xlim = range(mask[,1]), ylim = range(mask[,2])))
 
 inits <- function(){
 	ID = 1:n
@@ -54,9 +56,7 @@ inits <- function(){
 }
 
 initsTRUE <- function(){
-	ID <- capt.all$bincapt[, 7]
-	ID <- ID[keep]
-	ID <- as.integer(as.factor(ID))
+	ID <- dat$obs$ID
     p <- runif(1, 0.1, 0.5)
 	z = c(rep(1, max(ID)), rbinom(M-max(ID), 1, p))
 	lambda = 0.3
@@ -133,16 +133,9 @@ code <- nimbleCode({
 xlim <- range(mask[,1])
 ylim <- range(mask[,2])
 area <- diff(xlim)*diff(ylim)
-toa <- capt.all$toa
-capt <- capt.all$bincapt[,1:6]
-tmin <- apply(toa, 1, max)
-keep <- which(tmin < 1200)
-toa <- toa[keep,]
-ID <- capt.all$bincapt[, 7]
-ID <- ID[keep]
-ID <- as.integer(as.factor(ID))
-IDBen <- ID
-capt <- capt[keep,]
+toa <- dat$toa
+capt <- dat$capt
+ID <- dat$obs$ID
 
 # Constants:
 M <- 200
@@ -150,13 +143,6 @@ nu <- 330
 J <- nrow(traps)
 n <- nrow(capt)
 Time <- 30
-mint <- min(toa[toa != 0])
-toa<- toa - mint + 1	# That add one is to make sure they can't go negative for time of calling.
-toa <- toa*capt
-tmink <- tmin[keep] - mint
-
-# tmp <- do.call('rbind', permn(c(0,1,0,1,0,0)))
-# rowSums(tmp)
 
 constants <- list(
     J = J,

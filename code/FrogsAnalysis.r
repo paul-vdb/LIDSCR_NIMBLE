@@ -54,9 +54,7 @@ inits <- function(){
 }
 
 initsTRUE <- function(){
-	ID <- capt.all$bincapt[, 7]
-	ID <- ID[keep]
-	ID <- as.integer(as.factor(ID))
+	ID <- IDBen
     p <- runif(1, 0.1, 0.5)
 	z = c(rep(1, max(ID)), rbinom(M-max(ID), 1, p))
 	lambda = 0.3
@@ -144,6 +142,12 @@ ID <- as.integer(as.factor(ID))
 IDBen <- ID
 capt <- capt[keep,]
 
+# Thin a second time:
+thin <- c(24, 29, 45, 55, 77, 86) # potentially 77 + 86 as well.
+capt <- capt[-thin,]
+toa <- toa[-thin,]
+IDBen <- IDBen[-thin]
+
 # Constants:
 M <- 200
 nu <- 330
@@ -189,15 +193,15 @@ conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 0.05, adaptive = FALSE))
 for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
-	control = list(xlim = xlim, ylim = ylim, scale = 0.5, J = nrow(traps)))
+	control = list(xlim = xlim, ylim = ylim, scale = 0.05, J = nrow(traps)))
 
 
 # conf$removeSamplers(c('sigma', 'lam0'))
 # conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
 
-# conf$removeSamplers('sigmatoa')
+conf$removeSamplers('sigmatoa')
 # conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
-# conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
+conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
 
 # conf$printSamplers()
 
@@ -222,7 +226,7 @@ Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 Cmcmc$run(10000)
 mvSamples <- Cmcmc$mvSamples
 samples <- as.matrix(mvSamples)
-out <- mcmc(samples)
+out <- mcmc(samples[-(1:5000),])
 plot(out[, c("lambda", "sigmatoa")])
 plot(out[, c("sigma", "lam0")])
 plot(out[, c("D", "Nhat")])
@@ -242,15 +246,17 @@ hist(NActive)
 ID <- capt.all$bincapt[, 7]
 ID <- ID[keep]
 ID <- as.integer(as.factor(ID))
-x1 <- data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,1])], y= post.x2[cbind(1:nrow(post.id), post.id[,1])])
-x14 <-  data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,61])], y= post.x2[cbind(1:nrow(post.id), post.id[,61])])
+i1 <- 5
+i2 <- 12
+x1 <- data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,i1])], y= post.x2[cbind(1:nrow(post.id), post.id[,i1])])
+x14 <-  data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,i2])], y= post.x2[cbind(1:nrow(post.id), post.id[,i2])])
 
 # This is two obvious detections that should be matched and it is working great.
 ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) + 
 	theme_classic() + geom_point(data = x1, aes(x=x, y=y), col = "red", alpha = 0.1) + 
 	geom_point(data = x14, aes(x=x, y=y), col = "blue", alpha = 0.1) + 
-	geom_point(data = data.frame(traps)[capt[1,] == 1, ], aes(x=x,y=y), shape = 2, col = "red", size= 3) +
-	geom_point(data = data.frame(traps)[capt[61,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)	
+	geom_point(data = data.frame(traps)[capt[i1,] == 1, ], aes(x=x,y=y), shape = 2, col = "red", size= 3) +
+	geom_point(data = data.frame(traps)[capt[i2,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)	
 sum(post.id[,1] == post.id[,61])/nrow(post.id)
 
 
@@ -353,3 +359,60 @@ code_2 <- nimbleCode({
     Nhat <- sum(z[1:M])
 	D <- Nhat/area*10000
 })
+
+
+ind <-  86#which(rownames(capt) == 57)
+dmask2 <- t(apply(mask, 1, FUN = function(x){(traps[,1]-x[1])^2 + (traps[,2] - x[2])^2}))
+pkj <- (1-exp(-7.5*exp(-dmask2/(2*2.2^2))))
+
+ll_capt <- NULL
+etime <- NULL
+for(i in 1:n)
+{
+	pcapt <- apply(pkj, 1, FUN = function(x){dbinom_vector(capt[i,], size = rep(1,J),x)})
+	ptoa <- apply(sqrt(dmask2)/330, 1, FUN = function(x){dnorm_vector_marg(x = toa[i, ], mean = x, sd = 0.001, y = capt[i,1:J])})
+	x.ind <- which.max(ptoa*pcapt)
+	ll_capt <- c(ll_capt, pcapt[x.ind])
+	etime <- rbind(etime, sqrt(dmask2[x.ind,])/330)
+}
+
+boxplot(ll_capt[rowSums(capt) > 1 & ll_capt < 0.01])
+which(rowSums(capt) > 1 & ll_capt < 0.01)
+
+pcapt <- apply(pkj, 1, FUN = function(x){dbinom_vector(capt[ind,], size = rep(1,J),x)})
+ptoa <- apply(sqrt(dmask2)/330, 1, FUN = function(x){dnorm_vector_marg(x = toa[ind, ], mean = x, sd = 0.001, y = capt[ind,1:J])})
+p <- 1-rowProd(1-pkj)
+ggplot(data = data.frame(mask), aes(x=x,y=y)) + geom_tile(aes(fill=ptoa*pcapt)) + 
+	geom_point(data = data.frame(traps), aes(x=x,y=y), shape = 16, col = "red", size= 3) + 
+	geom_point(data = data.frame(traps)[capt[ind,]==1,], aes(x=x,y=y), shape = 16, col = "green", size= 3) 
+	# geom_point(data = x85, aes(x=x, y=y), col = "purple", alpha = 0.1)
+x.ind <- sample(1:nrow(mask), 1, prob = ptoa*pcapt)
+pkj[x.ind,]
+x.diff <- toa[ind,capt[ind,]==1] - sqrt(dmask2[x.ind,capt[ind,]==1])/330
+z = (x.diff - mean(x.diff))
+dnorm(z, mean = 0, sd = 0.0005)
+
+
+
+library(reshape2)
+library(data.table)
+toa2 <- (toa - etime)*capt
+tdoa <- t(apply(toa2, 1, FUN = function(x){x - sum(x)/sum(x!=0)}))
+tdoa <- (capt*tdoa)[rowSums(capt) > 1,]
+plot(tdoa[tdoa != 0])
+sd(tdoa[tdoa != 0])
+
+mi <- rowSums(capt)
+mi <- mi[mi>1]
+hist(1/sqrt(rgamma(10000, shape = 1 + sum(mi-1)/2, rate = sum(tdoa[tdoa != 0]^2))))
+
+dat <- melt(toa2)
+dat$value[dat$value ==0] <- NA
+dat <- data.table(dat)[, "mi" := sum(value > 0, na.rm = TRUE) , by = "Var1"]
+dat <- dat[mi > 1,]
+dat[, "sd" := sd(value, na.r), by = "Var1"]
+# dat[, "diff" := value - min(value,na.rm = TRUE), by = "Var1"]
+ggplot(data = dat, aes(x=value, y = Var2)) + geom_point() + facet_wrap(~Var1)
+ggplot(data = dat, aes(x = Var1, y = sd)) + geom_point()
+dat[Var1 == 57]
+dat[Var1 == 47]
