@@ -15,74 +15,72 @@ library(ggplot2)
 source("NimbleFunctions.R")
 source("SimData.R")
 
-## Load the from Augustine:
-load("../data/bobcats.Rdata")
-secrmask <- data.frame(bobcats$mask)
-names(secrmask) <- c("x", "y")
-secrtraps <- bobcats$traps
-habitatMask <- convertMask(secrmask, secrtraps, plot = TRUE)
-habMat <- habitatMask$habMat
-traps <- habitatMask$trapMat
-upperlimit <- habitatMask$upperLimit
-scaledMask <- habitatMask$scaledMask
-Time <- 187
-M <- 150
-marks <- bobcats$mark
-IDbobcat <- marks
-IDbobcat[grep("L|R", marks)] <- NA
-IDbobcat <- as.numeric(IDbobcat)
-kobs <- max(IDbobcat, na.rm = TRUE)
-J <- nrow(traps)
-y <- apply(bobcats$capt, 1, FUN = function(x){which(x == 1)})
-Time <- 187
-captureType <- gsub("[0-9]", "", bobcats$mark)
-captureType[1:18] <- "L"
-captureType[43:68] <- "R"
-captureType <- as.integer(as.factor(captureType))
+## Load the from Ben Augustine:
+side <- 8
+coords <- seq(1, side, length=side)
+traps <- cbind(x=rep(coords, each=side), y=rep(coords, times=side))
+buffer <- 2
+limits <- list('xlim' = c(min(traps[,1]-buffer), max(traps[,1]+buffer)), 
+			   'ylim' = c(min(traps[,2]-buffer), max(traps[,2]+buffer)))
+area <- diff(limits[['xlim']])*diff(limits[['ylim']])
+lambda <- lambdaTrue <- 0.5
+sigma <- sigmaTrue <- 0.5
+N <- NTrue <- 48
+StudyPeriod <- 5
+sim.dat <- simSCR(N = N, sigma = sigma, lambda = lambda, StudyPeriod = StudyPeriod, traps, limits)
 
-mustlink <- matrix(0, nrow = length(y), ncol = length(y))+diag(1, length(y))
-cannotlink <- matrix(0, nrow = length(y), ncol = length(y))
+# Now add right or left flank information:
+y <- sim.dat$trap_obs
 n <- length(y)
+mark <- paste0(sim.dat$ID, c("L", "R")[rbinom(n, 1, 0.5) + 1])
+
+# Constants:
+M <- 200
+J <- nrow(traps)
+Time <- StudyPeriod
+xlim <- limits[['xlim']]
+ylim <- limits[['ylim']]
+traps <- traps
+
+# Process marks
+mustlink <- diag(1, n)
+cannotlink <- matrix(0, nrow = n, ncol = n)
 for(i in 1:n)
 {
-	marki <- bobcats$mark[i]
+	marki <- mark[i]
 	LR <- gsub("[0-9]", "", marki)
 	num <-  gsub("[[:alpha:]]", "", marki)
-	ml <- bobcats$mark == marki
+	ml <- mark == marki
 	mustlink[ml,i] <- 1
 	mustlink[i,ml] <- 1	
 	if(LR == ""){
 		cannotlink[!ml,i] <- 1
 		cannotlink[i,!ml] <- 1		
 	}else{
-		cannotlink[!ml & grepl(LR, bobcats$mark), i] <- 1
-		cannotlink[i,!ml & grepl(LR, bobcats$mark)] <- 1
-		cannotlink[grep("L|R", bobcats$mark, invert = TRUE), i] <- 1
-		cannotlink[i, grep("L|R", bobcats$mark, invert = TRUE)] <- 1		
+		cannotlink[!ml & grepl(LR, mark), i] <- 1
+		cannotlink[i,!ml & grepl(LR, mark)] <- 1
+		cannotlink[grep("L|R", mark, invert = TRUE), i] <- 1
+		cannotlink[i, grep("L|R", mark, invert = TRUE)] <- 1		
 	}
 }
 
+
 inits <- function(){
     p <- runif(1, 0.1, 0.7)
-	id.known <- factor(bobcats$mark)
-	id.lr <- as.integer(factor(grep("L|R", id.known, value = TRUE)))
-	ID <- IDbobcat
-	ID[is.na(IDbobcat)] <- id.lr + kobs
-	ID[!is.na(IDbobcat)] <- NA	# True Values should be NA...
+	ID <- as.integer(as.factor(mark))
 	list(
         lambda = runif(1, 0.1, 2),
         psi = p,
         sigma = runif(1, 0.1, 1.5),
-        X = scaledMask[sample(nrow(scaledMask), M),],
+        X = cbind(runif(M, xlim[1],xlim[2]),runif(M, ylim[1], ylim[2])),
         ID = ID,
-        z = c(rep(NA, kobs), rep(1,max(id.lr)), rep(0, M-kobs-max(id.lr)))
+        z = c(rep(1, max(ID)), rep(0, M-max(ID)))
     )
 }
 
 
 code <- nimbleCode({
-    lambda[1] ~ dunif(0, 20) # Detection rate at distance 0
-    lambda[2] ~ dunif(0, 20) # Detection rate at distance 0
+    lambda ~ dunif(0, 20) # Detection rate at distance 0
     psi ~ dbeta(1, 1)      # prior on data augmentation bernoulli vec.
     sigma ~ dunif(0, 10)	# Now the prior is directly on sigma to be consistent with literature.
     tau2 <- 1/(2*sigma^2)
@@ -91,15 +89,13 @@ code <- nimbleCode({
 		# I'm not convinced on the independence sampler for X as you implemented Daniel...
 		# I think it could be a really good idea for weird state spaces and we should keep it in the back
 		# pocket but for the simulations I don't think it's necessary.
-        X[i, 1] ~ dunif(1, upperlimit[1])
-        X[i, 2] ~ dunif(1, upperlimit[2])
-		pOK[i] <- habMat[trunc(X[i, 1]), trunc(X[i, 2])] # habitat check
-		OK[i] ~ dbern(pOK[i]) # OK[i] = 1, the ones trick		
+        X[i, 1] ~ dunif(xlim[1], xlim[2])
+        X[i, 2] ~ dunif(ylim[1], ylim[2])
 		
         d2[i,1:J] <- (X[i,1]-traps[1:J,1])^2 + (X[i,2]-traps[1:J,2])^2
-        hkj[i,1:J] <- exp(-d2[i,1:J]*tau2)
+        hkj[i,1:J] <- exp(-d2[i,1:J]*tau2)*lambda
         # Hazard rate for animal across all traps.
-        Hk[i] <- sum(hkj[i,1:J])*Time*sum(lambda[1:2])
+        Hk[i] <- sum(hkj[i,1:J])*Time
 		Hkz[i] <- Hk[i]*z[i]
     }
     # Total thinning for all animals and traps.
@@ -108,7 +104,7 @@ code <- nimbleCode({
     for(i in 1:n_obs) {
         # trap probability given ID:
         # This one can certainly be just the ones trick for trap y[i].
-		pobs[i] <- lambda[captureType[i]]*hkj[ID[i], y[i]] + 0.0000000001
+		pobs[i] <- hkj[ID[i], y[i]] + 0.0000000001
         ones[i] ~ dbern(pobs[i])
 		ID[i] ~ dID()
     }
@@ -116,34 +112,29 @@ code <- nimbleCode({
     one ~ dbern(p)
     # Predicted population size
     Nhat <- sum(z[1:M])
-	sigma_scaled <- sigma*pixelWidth
 })
 
 constants <- list(
     J = J,
-    upperlimit = upperlimit,
+    xlim = xlim,
+	ylim = ylim,
     traps = traps, 
     Time = Time,
     M = M,
     n_obs = length(y),
-	y = y,
-	pixelWidth = attr(habitatMask, "pixelWidth")
-	)
+	y = y)
 
 data <- list(
     one = 1,
     ones = rep(1, length(y)),
-	OK = rep(1, M),
-	z =  c(rep(1, max(IDbobcat, na.rm = TRUE)), rep(NA, M - max(IDbobcat, na.rm = TRUE))),
-	ID = IDbobcat,
-	habMat = habMat,
-	captureType = captureType)
+	z =  rep(NA, M),
+	ID = rep(NA, n))
 
 Rmodel <- nimbleModel(code, constants, data, inits = inits())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('sigma', 'lambda',  'psi', 'Nhat', 'sigma_scaled', 'ID'))
+conf$setMonitors(c('sigma', 'lambda',  'psi', 'Nhat', 'ID'))
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = limits$xlim, ylim = limits$ylim, J = nrow(traps)))
@@ -151,16 +142,15 @@ for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_blo
 
 conf$removeSamplers('z')
 # Careful how to add sampler back!!
-conf$addSampler('z[16:150]', type = 'myBinary', scalarComponents = TRUE)
+conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
 # conf$printSamplers("z")
 
 conf$removeSamplers('ID')
 # conf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M = M))
 # conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
-mark <- unique(bobcats$mark)
-mark <- mark[grep("L|R", mark)]
-for(i in 1:length(mark)){
-	add <- which(bobcats$mark == mark[i])
+marktypes <- unique(mark)
+for(i in 1:length(marktypes)){
+	add <- which(mark == marktypes[i])
 	add.names <- paste0("ID[",add, "]")
 	conf$addSampler(target = add.names, type = 'mySPIM', scalarComponents = FALSE, control = list(M = M, cannotlink = cannotlink))
 }
@@ -178,7 +168,7 @@ samps <- as.matrix(mvSamples)
 post.id <- samps[-(1:5000),grep("ID", colnames(samps))]
 NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
 hist(NActive)
-samps.mcmc <- mcmc(samps[-(1:5000),c("sigma", "lambda[1]", "lambda[2]", "Nhat", 'psi', 'sigma_scaled')])
+samps.mcmc <- mcmc(samps[-(1:5000),c("sigma", "lambda", "Nhat", 'psi')])
 plot(samps.mcmc)
 
 id.tmp <- post.id[2500,]
@@ -238,18 +228,6 @@ data <- list(
 	ID = IDL,
 	habMat = habMat)
 
-
-inits <- function(){
-    p <- runif(1, 0.1, 0.7)
-	list(
-        lambda = runif(1, 0.1, 2),
-        psi = p,
-        sigma = runif(1, 0.1, 1.5),
-        X = scaledMask[sample(nrow(scaledMask), M),],
-        ID = IDL,
-        z = c(rep(1,max(IDL)), rep(0, M-max(IDL)))
-    )
-}
 
 
 Rmodel <- nimbleModel(code, constants, data, inits = inits())

@@ -388,7 +388,6 @@ sampler_mySPIM <- nimbleFunction(
 		no_link <- 0
 		if(n_currentValue == n_grp)
 		{
-			logProbs[currentValue] <<- logProbs[currentValue] + log(psi) - log(1-psi) - model[['Hk']][currentValue]
 			model[['z']][currentValue] <<- 0
 		}
         for(i in 1:k) {
@@ -404,25 +403,24 @@ sampler_mySPIM <- nimbleFunction(
 						{
 							logProbs[i] <<- -Inf
 						}else {
-							# values(model, targetNodesAsScalar) <<- i
 							values(model, targetNodesAsScalar) <<- rep(i, n_grp) 					
 							logProbs[i] <<- model$calculate(calcNodes)
 							if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
 						}
 					}
 				}else {
-					# values(model, targetNodesAsScalar) <<- i
-					values(model, targetNodesAsScalar) <<- rep(i, n_grp) ##  replace with this					
-					logProbs[i] <<- model$calculate(calcNodes) + log(psi) - log(1-psi) - model[['Hk']][i]
+					values(model, targetNodesAsScalar) <<- rep(i, n_grp)				
+					logProbs[i] <<- model$calculate(calcNodes)
 					if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
 				}
             }
         }
+		# Note that logProbs of z=1 and nk=0 is -Inf, or it had better be!y
+		logProbs <<- logProbs + model[['z']]*log(1-psi) + (1-model[['z']])*(log(psi)-model[['Hk']])
         logProbs <<- logProbs - max(logProbs)
         probs <<- exp(logProbs)
         newValue <- rcat(1, probs)
         if(newValue != currentValue) {
-            # values(model, targetNodesAsScalar) <<- newValue
 			values(model, targetNodesAsScalar) <<- rep(newValue, n_grp) ##  replace with this			
 			if(model[['z']][newValue] == 0){
 				model[['z']][newValue] <<- 1
@@ -433,7 +431,7 @@ sampler_mySPIM <- nimbleFunction(
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
         } else {
-			model[['z']][newValue] <<- 1
+			model[['z']][currentValue] <<- 1
             nimCopy(from = mvSaved, to = model, row = 1, nodes = target, logProb = TRUE)
             nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)

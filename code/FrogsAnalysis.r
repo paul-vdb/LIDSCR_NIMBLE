@@ -193,15 +193,15 @@ conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 0.05, adaptive = FALSE))
 for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
-	control = list(xlim = xlim, ylim = ylim, scale = 0.05, J = nrow(traps)))
+	control = list(xlim = xlim, ylim = ylim, scale = 0.01, J = nrow(traps)))
 
 
 # conf$removeSamplers(c('sigma', 'lam0'))
 # conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
 
 conf$removeSamplers('sigmatoa')
-# conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
-conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
+conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
+# conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
 
 # conf$printSamplers()
 
@@ -246,8 +246,8 @@ hist(NActive)
 ID <- capt.all$bincapt[, 7]
 ID <- ID[keep]
 ID <- as.integer(as.factor(ID))
-i1 <- 5
-i2 <- 12
+i1 <- 22
+i2 <- 60
 x1 <- data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,i1])], y= post.x2[cbind(1:nrow(post.id), post.id[,i1])])
 x14 <-  data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,i2])], y= post.x2[cbind(1:nrow(post.id), post.id[,i2])])
 
@@ -258,7 +258,6 @@ ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) +
 	geom_point(data = data.frame(traps)[capt[i1,] == 1, ], aes(x=x,y=y), shape = 2, col = "red", size= 3) +
 	geom_point(data = data.frame(traps)[capt[i2,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)	
 sum(post.id[,1] == post.id[,61])/nrow(post.id)
-
 
 # These are two not so obvious mathces that may actually not match 
 # but they should certainly not look like they do below.

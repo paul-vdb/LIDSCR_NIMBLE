@@ -18,7 +18,7 @@ source("SimData.R")
 
 
 load("../data/stacked-lightfooti.Rdata")
-dat <- simASCR(N = 50, sigma = 2.2, sigma_toa = 0.001, g0 = 7.5, lambda = 0.3, StudyPeriod = 30, 
+dat <- simASCR(N = 50, sigma = 2.2, sigma_toa = 0.00025, g0 = 7.5, lambda = 0.3, StudyPeriod = 30, 
 	traps = traps, limits = list(xlim = range(mask[,1]), ylim = range(mask[,2])))
 
 inits <- function(){
@@ -225,18 +225,16 @@ post.id <- samples[-(1:5000),grep("ID", colnames(samples))]
 NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
 hist(NActive)
 
-ID <- capt.all$bincapt[, 7]
-ID <- ID[keep]
-ID <- as.integer(as.factor(ID))
+
 x1 <- data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,1])], y= post.x2[cbind(1:nrow(post.id), post.id[,1])])
-x14 <-  data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,61])], y= post.x2[cbind(1:nrow(post.id), post.id[,61])])
+x14 <-  data.frame(x = post.x1[cbind(1:nrow(post.id), post.id[,2])], y= post.x2[cbind(1:nrow(post.id), post.id[,2])])
 
 # This is two obvious detections that should be matched and it is working great.
 ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) + 
 	theme_classic() + geom_point(data = x1, aes(x=x, y=y), col = "red", alpha = 0.1) + 
 	geom_point(data = x14, aes(x=x, y=y), col = "blue", alpha = 0.1) + 
 	geom_point(data = data.frame(traps)[capt[1,] == 1, ], aes(x=x,y=y), shape = 2, col = "red", size= 3) +
-	geom_point(data = data.frame(traps)[capt[61,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)	
+	geom_point(data = data.frame(traps)[capt[2,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)	
 sum(post.id[,1] == post.id[,61])/nrow(post.id)
 
 
