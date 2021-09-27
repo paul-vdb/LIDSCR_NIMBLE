@@ -298,11 +298,22 @@ summary(out.id)
 # but we need to increase the mask:
 ############################
 
+library(ascr)
+library(secr)
 
 
-
-
-
+traps2 <-convert.traps(traps)
+new.mask <- make.mask(traps = traps2, buffer = 15, spacing = 0.25, type = "trapbuffer")
+A <- attr(mask, "area")
+new.mask <- as.matrix(new.mask)
+attr(new.mask, "area") <- A
+attr(new.mask, "buffer") <- 15
+ascr.res <- fit.ascr(capt = list("bincapt" = capt, "toa" = toa), traps, mask = new.mask, 
+			detfn = "hhn")
+citation("ascr")
+#Output:
+#           D      lambda0        sigma    sigma.toa 
+# 9.200900e+02 4.966609e+00 2.541285e+00 3.486909e-04 
 
 
 Cmcmc$run(10000)
