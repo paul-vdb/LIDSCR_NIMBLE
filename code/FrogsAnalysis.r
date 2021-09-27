@@ -11,7 +11,6 @@ library(nimble)
 library(nimbleSCR)
 library(coda)
 library(ggplot2)
-library(combinat)
 
 source("NimbleFunctions.R")
 source("SimData.R")
@@ -25,19 +24,18 @@ inits <- function(){
 	z = c(rep(1, n), rbinom(M-n, 1, p))
 	lambda = runif(1, 0.1, 2)
 	sigma = runif(1, 5, 10)
-	lam0 = runif(1,1,10)
+	g0 = runif(1,1,10)
 
 	dmask2 <- t(apply(mask, 1, FUN = function(x){(traps[,1]-x[1])^2 + (traps[,2] - x[2])^2}))
-	pkj <- (1-exp(-lam0*exp(-dmask2/(2*sigma^2))))
+	pkj <- (1-exp(-g0*exp(-dmask2/(2*sigma^2))))
 	panimal <- apply(pkj, 1, FUN = function(x){colSums(log(x)%*%t(capt) + log(1-x)%*%t(1-capt))})
 	X <- cbind(runif(M, xlim[1], xlim[2]), 
 			  runif(M, ylim[1], ylim[2]))
 			  
 	for(i in 1:M){
 		if(sum(ID == i) == 0) next;
-		if(sum(ID == i) == 1) pID <- panimal[ID == i, ]
-		if(sum(ID == i) > 1) pID <- colSums(panimal[ID == i, ])
-		mpt <- sample(ncol(panimal), 1, prob = exp(pID))
+		pID <- panimal[ID == i, ]
+		mpt <- sample(ncol(panimal), 1, prob = exp(panimal[ID == i, ]))
 		X[i,] <- mask[mpt,]
 	}
 	sigmatoa = runif(1, 0.8, 1)
@@ -46,43 +44,7 @@ inits <- function(){
         psi = p,
         sigma = sigma,
 		sigmatoa = sigmatoa,
-		lam0 = lam0,
-		X=X,
-		ID = ID,
-		z=z
-    )
-}
-
-initsTRUE <- function(){
-	ID <- IDBen
-    p <- runif(1, 0.1, 0.5)
-	z = c(rep(1, max(ID)), rbinom(M-max(ID), 1, p))
-	lambda = 0.3
-	sigma = 2.3
-	lam0 = 5.8
-
-	dmask2 <- t(apply(mask, 1, FUN = function(x){(traps[,1]-x[1])^2 + (traps[,2] - x[2])^2}))
-	pkj <- (1-exp(-lam0*exp(-dmask2/(2*sigma^2))))
-	panimal <- apply(pkj, 1, FUN = function(x){colSums(log(x + .Machine$double.eps)%*%t(capt) + log(1-x + .Machine$double.eps)%*%t(1-capt))})
-	X <- cbind(runif(M, xlim[1], xlim[2]), 
-			  runif(M, ylim[1], ylim[2]))
-			  
-	for(i in 1:M){
-		if(sum(ID == i) == 0) next;
-		if(sum(ID == i) == 1) pID <- panimal[ID == i, ]
-		if(sum(ID == i) > 1) pID <- colSums(panimal[ID == i, ])
-		mpt <- sample(ncol(panimal), 1, prob = exp(pID))
-		X[i,] <- mask[mpt,]
-	}
-	
-	sigmatoa = 0.002
-
-	list(
-        lambda = lambda,
-        psi = p,
-        sigma = sigma,
-		sigmatoa = sigmatoa,
-		lam0 = lam0,
+		g0 = g0,
 		X=X,
 		ID = ID,
 		z=z
@@ -94,11 +56,8 @@ code <- nimbleCode({
     psi ~ dbeta(1, 1)      # Prior on data augmentation bernoulli vec.
     sigma ~ dunif(0, 10)	# Now the prior is directly on sigma to be consistent with literature.
     tau2 <- 1/(2*sigma^2)
-	#tautoa ~ dunif(10,10000000)
-	sigmatoa ~ dunif(0,1) # 1/sqrt(tautoa)
-	lam0 ~ dunif(0, 20)
-	# lam0 <- 7.5
-	# sigma <- 2.2
+	sigmatoa ~ dunif(0,1) #1/sqrt(tautoa)
+	g0 ~ dunif(0, 50)
     for(i in 1:M) {
         z[i] ~ dbern(psi)
         X[i, 1] ~ dunif(xlim[1], xlim[2])
@@ -106,8 +65,7 @@ code <- nimbleCode({
 		# X[i, 1:2] ~ dX()
         d2[i,1:J] <- (X[i,1]-traps[1:J,1])^2 + (X[i,2]-traps[1:J,2])^2
 		expTime[i,1:J] <- sqrt(d2[i,1:J])/nu
-        # pkj[i,1:J] <- lam0*exp(-d2[i,1:J]*tau2)
-        pkj[i,1:J] <- (1-exp(-lam0*exp(-d2[i,1:J]*tau2)))
+        pkj[i,1:J] <- (1-exp(-g0*exp(-d2[i,1:J]*tau2)))
         # Hazard rate for animal across all traps.
         Hk[i] <-(1-prod(1-pkj[i,1:J]))*lambda*Time
 		Hkz[i] <- Hk[i]*z[i]
@@ -124,8 +82,8 @@ code <- nimbleCode({
 	p <- exp(-sum(Hkz[1:M]))*lambda^n_obs
     one ~ dbern(p)
     # Predicted population size
-    Nhat <- sum(z[1:M])
-	D <- Nhat/area*10000
+    N <- sum(z[1:M])
+	D <- N/area*10000
 })
 
 xlim <- range(mask[,1])
@@ -143,7 +101,7 @@ IDBen <- ID
 capt <- capt[keep,]
 
 # Thin a second time:
-thin <- c(24, 29, 45, 55, 77, 86) # potentially 77 + 86 as well.
+thin <- 55 # c(24, 29, 45, 55) # potentially 77 + 86 as well.
 capt <- capt[-thin,]
 toa <- toa[-thin,]
 IDBen <- IDBen[-thin]
@@ -154,10 +112,10 @@ nu <- 330
 J <- nrow(traps)
 n <- nrow(capt)
 Time <- 30
-mint <- min(toa[toa != 0])
-toa<- toa - mint + 1	# That add one is to make sure they can't go negative for time of calling.
-toa <- toa*capt
-tmink <- tmin[keep] - mint
+# mint <- min(toa[toa != 0])
+# toa<- toa - mint + 1	# That add one is to make sure they can't go negative for time of calling.
+# toa <- toa*capt
+# tmink <- tmin[keep] - mint
 
 # tmp <- do.call('rbind', permn(c(0,1,0,1,0,0)))
 # rowSums(tmp)
@@ -180,24 +138,19 @@ data <- list(
 	toa = toa,
 	z = rep(NA, M),
 	ID = rep(NA, nrow(capt))
-	# ID = IDBen
 )
 
-Rmodel <- nimbleModel(code, constants, data, inits = initsTRUE())
+Rmodel <- nimbleModel(code, constants, data, inits = inits())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'lam0', 'Nhat', 'D', 'ID', 'z', 'X'))
+conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'g0', 'N', 'D', 'ID'))
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 0.05, adaptive = FALSE))
 for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
-	control = list(xlim = xlim, ylim = ylim, scale = 0.01, J = nrow(traps)))
-
-
-# conf$removeSamplers(c('sigma', 'lam0'))
-# conf$addSampler(target = c('sigma', 'lam0'), type = 'RW_block', silent = TRUE)
+	control = list(xlim = xlim, ylim = ylim, scale = 0.25, J = nrow(traps)))
 
 conf$removeSamplers('sigmatoa')
 conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
@@ -209,9 +162,118 @@ conf$removeSamplers('z')
 conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
 
 conf$removeSamplers('ID')
+# Sampler from Chandler and Royle 2013
 # conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
+# New Allocation Sampler.
 conf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M = M))
-# conf$addSampler('ID', type = 'myIDZASCR2', scalarComponents = TRUE, control = list(M = M, J = J))
+
+# conf$printSamplers()
+
+Rmcmc <- buildMCMC(conf)
+
+Cmodel <- compileNimble(Rmodel)
+Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
+
+# Make sure it runs...
+# Cmcmc$run(100)
+# mvSamples <- Cmcmc$mvSamples
+# samples <- as.matrix(mvSamples)
+# out <- mcmc(samples)
+
+mcmc.out <- runMCMC(Cmcmc, nburnin = 10000, niter = 30000, nchains = 3, 
+	inits = list(inits(), inits(), inits()))	
+
+out <- as.mcmc.list(list(mcmc(mcmc.out[[1]])[, c("sigma", "sigmatoa", "lambda", "g0", "N", "D")], 
+	mcmc(mcmc.out[[2]])[, c("sigma", "sigmatoa", "lambda", "g0", "N", "D")], 
+	mcmc(mcmc.out[[3]])[, c("sigma", "sigmatoa", "lambda", "g0", "N", "D")]))
+summary(out)
+plot(out)
+
+# Estimate the number of detected animals.
+
+
+
+###########
+# Known ID ASCR from Stevenson 2020
+###########
+
+
+initsID <- function(){
+    p <- runif(1, 0.1, 0.5)
+	z = c(rep(NA, max(IDBen)), rbinom(M-max(IDBen), 1, p))
+	lambda = 0.3
+	sigma = 2.3
+	g0 = 5.8
+
+	dmask2 <- t(apply(mask, 1, FUN = function(x){(traps[,1]-x[1])^2 + (traps[,2] - x[2])^2}))
+	pkj <- (1-exp(-g0*exp(-dmask2/(2*sigma^2))))
+	panimal <- apply(pkj, 1, FUN = function(x){colSums(log(x + .Machine$double.eps)%*%t(capt) + log(1-x + .Machine$double.eps)%*%t(1-capt))})
+	X <- cbind(runif(M, xlim[1], xlim[2]), 
+			  runif(M, ylim[1], ylim[2]))
+			  
+	for(i in 1:M){
+		if(sum(IDBen == i) == 0) next;
+		if(sum(IDBen == i) == 1) pID <- panimal[IDBen == i, ]
+		if(sum(IDBen == i) > 1) pID <- colSums(panimal[IDBen == i, ])
+		mpt <- sample(ncol(panimal), 1, prob = exp(pID))
+		X[i,] <- mask[mpt,]
+	}
+	
+	sigmatoa = runif(1, 0.0001, 0.001)
+
+	list(
+        lambda = lambda,
+        psi = p,
+        sigma = sigma,
+		sigmatoa = sigmatoa,
+		g0 = g0,
+		X=X,
+		z=z
+    )
+}
+constants <- list(
+    J = J,
+    xlim = xlim,
+    ylim = ylim,
+    traps = traps, 
+    Time = Time,
+    M = M,
+    n_obs = nrow(capt),
+	trials = rep(1, J),
+	nu = nu,
+	area = area)
+
+data.id <- list(
+	one = 1,
+    y = capt,
+	toa = toa,
+	z = c(rep(1, max(IDBen)), rep(NA, M-max(IDBen))),
+	ID = IDBen
+)
+
+Rmodel <- nimbleModel(code, constants, data.id, inits = initsID())
+
+conf <- configureMCMC(Rmodel)
+
+conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'g0', 'Nhat', 'D', 'ID', 'z', 'X'))
+
+conf$removeSamplers('X')
+# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
+for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 0.05, adaptive = FALSE))
+# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
+	# control = list(xlim = xlim, ylim = ylim, scale = 1, J = nrow(traps)))
+
+# conf$removeSamplers(c('sigma', 'g0'))
+# conf$addSampler(target = c('sigma', 'g0'), type = 'RW_block', silent = TRUE)
+
+conf$removeSamplers('sigmatoa')
+conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
+# conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
+
+# conf$printSamplers()
+
+conf$removeSamplers('z')
+conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
 
 # conf$printSamplers()
 
@@ -223,16 +285,36 @@ Rmcmc <- buildMCMC(conf)
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
+mcmc.out.id <- runMCMC(Cmcmc, nburnin = 10000, niter = 30000, nchains = 3, 
+	inits = list(initsID(), initsID(), initsID()))	
+
+out.id <- as.mcmc.list(mcmc(mcmc.out.id[[1]])[, c("sigma", "sigmatoa", "lambda", "g0", "Nhat", "D")], 
+	mcmc(mcmc.out.id[[2]])[, c("sigma", "sigmatoa", "lambda", "g0", "Nhat", "D")], 
+	mcmc(mcmc.out.id[[3]])[, c("sigma", "sigmatoa", "lambda", "g0", "Nhat", "D")])
+summary(out.id)
+
+############################
+# Now run it with ASCR, 
+# but we need to increase the mask:
+############################
+
+
+
+
+
+
+
+
 Cmcmc$run(10000)
 mvSamples <- Cmcmc$mvSamples
 samples <- as.matrix(mvSamples)
 out <- mcmc(samples[-(1:5000),])
 plot(out[, c("lambda", "sigmatoa")])
-plot(out[, c("sigma", "lam0")])
+plot(out[, c("sigma", "g0")])
 plot(out[, c("D", "Nhat")])
 summary(out[, c("D", "Nhat")])
 summary(out[, c("lambda", "sigmatoa")])
-summary(out[, c("sigma", "lam0")])
+summary(out[, c("sigma", "g0")])
 
 # Demonstrate the problem:
 post.x <- samples[-(1:5000),grep("X", colnames(samples))]
@@ -272,146 +354,3 @@ ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) +
 	geom_point(data = data.frame(traps)[capt[78,] == 1, ], aes(x=x,y=y), shape = 2, col = "red", size= 3) +
 	geom_point(data = data.frame(traps)[capt[85,] == 1, ], aes(x=x,y=y), shape = 3, col = "blue", size= 3)
 sum(post.id[,78] == post.id[,85])/nrow(post.id)
-
-
-Rmodel$sigmatoa <- 0.0003
-Rmodel$calculate()
-
-target <- 'ID[78]'
-logprobs <- numeric(M)
-calcNodes <- Rmodel$getDependencies(target)
-for(i in 1:M)
-{
-	Rmodel[[target]] <- i
-	logprobs[i] <- Rmodel$calculate(calcNodes)
-}
-p <- exp(logprobs - max(logprobs))
-ggplot(data = data.frame(traps), aes(x=x,y=y)) + geom_point(shape = 4) + 
-	theme_classic() + geom_point(data = data.frame(Rmodel$X), 
-		aes(x=X1, y=X2, colour = p))
-
-
-# Is there ever a z = 0 with an ID.
-ids <- samples[,grep("ID", colnames(samples))]
-zs <- samples[,grep("z", colnames(samples))]
-ones <- do.call('rbind', lapply(1:nrow(ids), FUN = function(x){zs[x, ids[x,]]}))
-
-# Show Mask info:
-ind <- 3
-dmask2 <- t(apply(mask, 1, FUN = function(x){(traps[,1]-x[1])^2 + (traps[,2] - x[2])^2}))
-pkj <- (1-exp(-6.5*exp(-dmask2/(2*2.2^2))))
-pcapt <- apply(pkj, 1, FUN = function(x){dbinom_vector(capt[ind,], size = rep(1,J),x)})
-ptoa <- apply(sqrt(dmask2)/330, 1, FUN = function(x){dnorm_vector_marg(x = toa[ind, ], mean = x, sd = 0.001, y = capt[ind,1:J])})
-p <- 1-rowProd(1-pkj)
-ggplot(data = data.frame(mask), aes(x=x,y=y)) + geom_tile(aes(fill=ptoa*pcapt)) + 
-	geom_point(data = data.frame(traps), aes(x=x,y=y), shape = 16, col = "red", size= 3) + 
-	geom_point(data = data.frame(traps)[capt[ind,]==1,], aes(x=x,y=y), shape = 16, col = "green", size= 3) 
-	# geom_point(data = x85, aes(x=x, y=y), col = "purple", alpha = 0.1)
-
-
-
-d <- seq(0, 20, by = 0.1)
-p <- (1-exp(-3.93*exp(-d^2/(2*2.76^2))))
-p2 <- (1-exp(-7.5*exp(-d^2/(2*2.76^2))))
-p3 <- (1-exp(-7.5*exp(-d^2/(2*2.2^2))))
-plot(d, p, type = 'l')
-lines(d, p2, type = 'l', col = 'red')
-lines(d, p3, type = 'l', col = 'blue')
-
-
-
-code_2 <- nimbleCode({
-    lambda ~ dunif(0, 10) # Detection rate at distance 0
-    psi ~ dbeta(1, 1)      # Prior on data augmentation bernoulli vec.
-    sigma ~ dunif(0, 10)	# Now the prior is directly on sigma to be consistent with literature.
-    tau2 <- 1/(2*sigma^2)
-	#tautoa ~ dunif(10,10000000)
-	sigmatoa ~ dunif(0,1) # 1/sqrt(tautoa)
-	lam0 ~ dunif(0, 20)
-    for(i in 1:M) {
-        z[i] ~ dbern(psi)
-        X[i, 1] ~ dunif(xlim[1], xlim[2])
-        X[i, 2] ~ dunif(ylim[1], ylim[2])
-		# X[i, 1:2] ~ dX()
-        d2[i,1:J] <- (X[i,1]-traps[1:J,1])^2 + (X[i,2]-traps[1:J,2])^2
-		expTime[i,1:J] <- sqrt(d2[i,1:J])/nu
-        # pkj[i,1:J] <- lam0*exp(-d2[i,1:J]*tau2)
-        pkj[i,1:J] <- (1-exp(-lam0*exp(-d2[i,1:J]*tau2)))
-        # Hazard rate for animal across all traps.
-		p0[i] <- (1-prod(1-pkj[i,1:J]))
-		for(j in 1:J) p1[j,i] <- dbinom_vector(x = mat1[j,], size = trials[1:J], prob = pkj[i,1:J], log = 0)
-        Hk[i] <- (1-p0[i]-sum(p1[1:J,i]))*lambda*Time
-		Hkz[i] <- Hk[i]*z[i]
-    }	
-    # Trap history model.
-    # and unobserved animal ID.
-    for(i in 1:n_obs) {
-        # Bernoulli capture history for each call that depends on ID
-		y[i,1:J] ~ dbinom_vector(size = trials[1:J], pkj[ID[i],1:J])
-		# Time of arrival, depends on which traps actually recorded it.
-		toa[i, 1:J] ~ dnorm_vector_marg(mean = expTime[ID[i],1:J], sd = sigmatoa, y = y[i,1:J])
-		ID[i] ~ dID()
-    }
-	p <- exp(-sum(Hkz[1:M]))*lambda^n_obs
-    one ~ dbern(p)
-    # Predicted population size
-    Nhat <- sum(z[1:M])
-	D <- Nhat/area*10000
-})
-
-
-ind <-  86#which(rownames(capt) == 57)
-dmask2 <- t(apply(mask, 1, FUN = function(x){(traps[,1]-x[1])^2 + (traps[,2] - x[2])^2}))
-pkj <- (1-exp(-7.5*exp(-dmask2/(2*2.2^2))))
-
-ll_capt <- NULL
-etime <- NULL
-for(i in 1:n)
-{
-	pcapt <- apply(pkj, 1, FUN = function(x){dbinom_vector(capt[i,], size = rep(1,J),x)})
-	ptoa <- apply(sqrt(dmask2)/330, 1, FUN = function(x){dnorm_vector_marg(x = toa[i, ], mean = x, sd = 0.001, y = capt[i,1:J])})
-	x.ind <- which.max(ptoa*pcapt)
-	ll_capt <- c(ll_capt, pcapt[x.ind])
-	etime <- rbind(etime, sqrt(dmask2[x.ind,])/330)
-}
-
-boxplot(ll_capt[rowSums(capt) > 1 & ll_capt < 0.01])
-which(rowSums(capt) > 1 & ll_capt < 0.01)
-
-pcapt <- apply(pkj, 1, FUN = function(x){dbinom_vector(capt[ind,], size = rep(1,J),x)})
-ptoa <- apply(sqrt(dmask2)/330, 1, FUN = function(x){dnorm_vector_marg(x = toa[ind, ], mean = x, sd = 0.001, y = capt[ind,1:J])})
-p <- 1-rowProd(1-pkj)
-ggplot(data = data.frame(mask), aes(x=x,y=y)) + geom_tile(aes(fill=ptoa*pcapt)) + 
-	geom_point(data = data.frame(traps), aes(x=x,y=y), shape = 16, col = "red", size= 3) + 
-	geom_point(data = data.frame(traps)[capt[ind,]==1,], aes(x=x,y=y), shape = 16, col = "green", size= 3) 
-	# geom_point(data = x85, aes(x=x, y=y), col = "purple", alpha = 0.1)
-x.ind <- sample(1:nrow(mask), 1, prob = ptoa*pcapt)
-pkj[x.ind,]
-x.diff <- toa[ind,capt[ind,]==1] - sqrt(dmask2[x.ind,capt[ind,]==1])/330
-z = (x.diff - mean(x.diff))
-dnorm(z, mean = 0, sd = 0.0005)
-
-
-
-library(reshape2)
-library(data.table)
-toa2 <- (toa - etime)*capt
-tdoa <- t(apply(toa2, 1, FUN = function(x){x - sum(x)/sum(x!=0)}))
-tdoa <- (capt*tdoa)[rowSums(capt) > 1,]
-plot(tdoa[tdoa != 0])
-sd(tdoa[tdoa != 0])
-
-mi <- rowSums(capt)
-mi <- mi[mi>1]
-hist(1/sqrt(rgamma(10000, shape = 1 + sum(mi-1)/2, rate = sum(tdoa[tdoa != 0]^2))))
-
-dat <- melt(toa2)
-dat$value[dat$value ==0] <- NA
-dat <- data.table(dat)[, "mi" := sum(value > 0, na.rm = TRUE) , by = "Var1"]
-dat <- dat[mi > 1,]
-dat[, "sd" := sd(value, na.r), by = "Var1"]
-# dat[, "diff" := value - min(value,na.rm = TRUE), by = "Var1"]
-ggplot(data = dat, aes(x=value, y = Var2)) + geom_point() + facet_wrap(~Var1)
-ggplot(data = dat, aes(x = Var1, y = sd)) + geom_point()
-dat[Var1 == 57]
-dat[Var1 == 47]

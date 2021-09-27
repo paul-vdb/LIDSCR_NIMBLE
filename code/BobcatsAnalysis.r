@@ -11,7 +11,6 @@ library(nimbleSCR)
 library(coda)
 library(ggplot2)
 
-
 source("NimbleFunctions.R")
 source("SimData.R")
 

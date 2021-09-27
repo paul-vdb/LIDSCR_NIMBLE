@@ -162,7 +162,7 @@ Rmcmc <- buildMCMC(conf)
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-Cmcmc$run(10000)
+Cmcmc$run(15000)
 mvSamples <- Cmcmc$mvSamples
 samps <- as.matrix(mvSamples)
 post.id <- samps[-(1:5000),grep("ID", colnames(samps))]
@@ -202,6 +202,24 @@ cannotlink[30,31:34]
 
 no_link <- sum(cannotlink[model[['ID']] == i, nodeIndex])
 table(z.out[cbind(1:nrow(samps), id.out[,72])])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # Single Side SCR0:
@@ -250,7 +268,7 @@ Rmcmc <- buildMCMC(conf)
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-Cmcmc$run(30000)
+Cmcmc$run(15000)
 mvSamples <- Cmcmc$mvSamples
 samps <- as.matrix(mvSamples)
 samps.mcmc <- mcmc(samps[-(1:5000),c("sigma", "lambda[1]", "lambda[2]", "Nhat", 'psi', 'sigma_scaled')])

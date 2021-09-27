@@ -38,15 +38,14 @@ dnorm_vector_marg <- nimbleFunction(
                   log = integer(0, default = 0)
                   ) {
     returnType(double(0))
-	# This is not really a normal distribution but a small correction and it's proportional.
-	# Fingers crossed...
 	m <- sum(y)
 	if(m == 1){
-		if(log) return(0) else return(1)
-	}
-	td <- x[y==1] - mean[y==1]
-	etdiff <- sum(td)/m
-    logProb <- (1-m)*log(sd) - sum((td - etdiff)^2)/(2*sd^2) # Normal correction factor.
+		logProb <- 0
+	}else{
+		td <- (x - mean)*y
+		etd <- sum(td)/m
+		logProb <- (1-m)*log(sd) - sum(y*(td - etd)^2)/(2*sd^2)
+	}	
     if(log) return(logProb) else return(exp(logProb))
   })
 
@@ -596,4 +595,3 @@ sampler_mySigmaToa <- nimbleFunction(
     },
     methods = list( reset = function() {} )
 )
-
