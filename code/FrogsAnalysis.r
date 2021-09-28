@@ -188,10 +188,16 @@ out <- as.mcmc.list(list(mcmc(mcmc.out[[1]])[, c("sigma", "sigmatoa", "lambda", 
 	mcmc(mcmc.out[[3]])[, c("sigma", "sigmatoa", "lambda", "g0", "N", "D")]))
 summary(out)
 plot(out)
+save(out, file = "../output/FrogsLatentID.Rda")
 
 # Estimate the number of detected animals.
-
-
+func <- function(x)
+{
+	apply(x, 1, FUN = function(i){sum(1:M %in% i)})
+}
+id.list <- lapply(mcmc.out, FUN = function(x){func(x[,grep("ID", colnames(x))])})
+NActive <- do.call("c", id.list)
+hist(NActive)
 
 ###########
 # Known ID ASCR from Stevenson 2020
@@ -231,17 +237,6 @@ initsID <- function(){
 		z=z
     )
 }
-constants <- list(
-    J = J,
-    xlim = xlim,
-    ylim = ylim,
-    traps = traps, 
-    Time = Time,
-    M = M,
-    n_obs = nrow(capt),
-	trials = rep(1, J),
-	nu = nu,
-	area = area)
 
 data.id <- list(
 	one = 1,
@@ -255,13 +250,13 @@ Rmodel <- nimbleModel(code, constants, data.id, inits = initsID())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'g0', 'Nhat', 'D', 'ID', 'z', 'X'))
+conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'g0', 'N', 'D'))
 
 conf$removeSamplers('X')
 # for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
-for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 0.05, adaptive = FALSE))
-# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
-	# control = list(xlim = xlim, ylim = ylim, scale = 1, J = nrow(traps)))
+# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 0.05, adaptive = FALSE))
+for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
+	control = list(xlim = xlim, ylim = ylim, scale = 0.25, J = nrow(traps)))
 
 # conf$removeSamplers(c('sigma', 'g0'))
 # conf$addSampler(target = c('sigma', 'g0'), type = 'RW_block', silent = TRUE)
@@ -288,10 +283,13 @@ Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 mcmc.out.id <- runMCMC(Cmcmc, nburnin = 10000, niter = 30000, nchains = 3, 
 	inits = list(initsID(), initsID(), initsID()))	
 
-out.id <- as.mcmc.list(mcmc(mcmc.out.id[[1]])[, c("sigma", "sigmatoa", "lambda", "g0", "Nhat", "D")], 
-	mcmc(mcmc.out.id[[2]])[, c("sigma", "sigmatoa", "lambda", "g0", "Nhat", "D")], 
-	mcmc(mcmc.out.id[[3]])[, c("sigma", "sigmatoa", "lambda", "g0", "Nhat", "D")])
+out.id <- as.mcmc.list(list(mcmc(mcmc.out.id[[1]])[, c("sigma", "sigmatoa", "lambda", "g0", "N", "D")], 
+	mcmc(mcmc.out.id[[2]])[, c("sigma", "sigmatoa", "lambda", "g0", "N", "D")], 
+	mcmc(mcmc.out.id[[3]])[, c("sigma", "sigmatoa", "lambda", "g0", "N", "D")]))
 summary(out.id)
+plot(out.id)
+
+save(out.id, file = "../output/FrogsKnownID.Rda")
 
 ############################
 # Now run it with ASCR, 
@@ -300,7 +298,6 @@ summary(out.id)
 
 library(ascr)
 library(secr)
-
 
 traps2 <-convert.traps(traps)
 new.mask <- make.mask(traps = traps2, buffer = 15, spacing = 0.25, type = "trapbuffer")
