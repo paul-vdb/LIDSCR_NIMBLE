@@ -30,65 +30,68 @@ attr(mask, "buffer") <- 15
 
 
 inits <- function(){
-	ID = 1:n
-    p <- runif(1, 0.1, 0.5)
-	z = c(rep(1, n), rbinom(M-n, 1, p))
+	ID <- numeric(length(occ))
+	ID[occ == 1] <- 1:sum(occ == 1)
+	ID[occ == 2] <- 1:sum(occ == 2)
+	z <- matrix(0, ncol = 2, nrow = M)
+	z[ID[occ==1],1] <- 1
+	z[ID[occ==2],2] <- 1
+    p <- runif(1, 0.1, 0.3)
 	lambda = runif(1, 0.1, 2)
-	sigma = runif(1, 5, 10)
+	sigma = runif(1, 3, 5)
 	g0 = runif(1,1,10)
 
 	dmask2 <- t(apply(mask, 1, FUN = function(x){(traps[,1]-x[1])^2 + (traps[,2] - x[2])^2}))
 	pkj <- (1-exp(-g0*exp(-dmask2/(2*sigma^2))))
 	panimal <- apply(pkj, 1, FUN = function(x){colSums(log(x)%*%t(capt) + log(1-x)%*%t(1-capt))})
-	X <- cbind(runif(M, xlim[1], xlim[2]), 
-			  runif(M, ylim[1], ylim[2]))
-			  
-	for(i in 1:M){
-		if(sum(ID == i) == 0) next;
-		pID <- panimal[ID == i, ]
-		mpt <- sample(ncol(panimal), 1, prob = exp(panimal[ID == i, ]))
-		X[i,] <- mask[mpt,]
+	X <- array(runif(M*2*2, xlim[1], xlim[2]), c(M,2,2))		
+	
+	for(k in 1:2){
+		for(i in 1:M){
+			if(sum(ID[occ == k] == i) == 0) next;
+			if(sum(ID[occ == k] == i) == 1) pID <- panimal[which(ID[occ == k] == i), ]
+			if(sum(ID[occ == k] == i) > 1) pID <- colSums(panimal[which(ID[occ == k] == i), ])
+			mpt <- sample(ncol(panimal), 1, prob = exp(pID))
+			X[i,,k] <- mask[mpt,]
+		}
 	}
-	sigmatoa = runif(1, 0.8, 1)
+
 	list(
         lambda = lambda,
         psi = p,
         sigma = sigma,
-		sigmatoa = sigmatoa,
+		sigmatoa = runif(1, 0.01, 1),
 		g0 = g0,
-		X=X,
-		ID = ID,
-		z=z
+		X = X,
+        ID = ID,
+		z = z
     )
 }
 
 code <- nimbleCode({
-    lambda ~ dgamma(0.1, 0.1) # Detection rate at distance 0
+    lambda ~ dunif(0, 10) # Detection rate at distance 0
     psi ~ dbeta(1, 1)      # Prior on data augmentation bernoulli vec.
     sigma ~ dunif(0, 10)	# Now the prior is directly on sigma to be consistent with literature.
     tau2 <- 1/(2*sigma^2)
-	sigmatoa ~ dunif(0, 0.5)
-	lam0 ~ dunif(0, 20)
-	for(k in 1:2) {
-		for(i in 1:M) {
-			z[i,k] ~ dbern(psi)
-			X[i, 1, k] ~ dunif(xlim[1], xlim[2])
-			X[i, 2, k] ~ dunif(ylim[1], ylim[2])
-			d2[i,1:J, k] <- (X[i,1,k]-traps[1:J,1])^2 + (X[i,2,k]-traps[1:J,2])^2
-			expTime[i, 1:J, k] <- sqrt(d2[i,1:J,k])/nu
-			# pkj[i,1:J] <- exp(-d2[i,1:J]*tau2)*z[i]
-			pkj[i,1:J,k] <- (1-exp(-lam0*exp(-d2[i,1:J,k]*tau2)))*z[i,k]		
+	sigmatoa ~ dunif(0, 1)
+	g0 ~ dunif(0, 20)
+	for(v in 1:n_occ) {
+		for(k in 1:M) {
+			z[k,v] ~ dbern(psi)
+			X[k, 1, v] ~ dunif(xlim[1], xlim[2])
+			X[k, 2, v] ~ dunif(ylim[1], ylim[2])
+			d2[k,1:J, v] <- (X[k,1,v]-traps[1:J,1])^2 + (X[k,2,v]-traps[1:J,2])^2
+			expTime[k, 1:J, v] <- sqrt(d2[k,1:J,v])/nu
+			pkj[k,1:J,v] <- (1-exp(-g0*exp(-d2[k,1:J,v]*tau2)))	
 			# Hazard rate for animal across all traps.
-			pk[i,k] <- (1-prod(1-pkj[i,1:J,k]))
+			Hk[k,v] <-(1-prod(1-pkj[k,1:J,v]))*lambda*Time
+			Hkz[k,v] <- Hk[k,v]*z[k,v]
 		}
 		# Total thinning for all animals and traps.
-		p[k] <- sum(pk[1:M,k])		
+		H[v] <- sum(Hkz[1:M,v])		
 		# Predicted population size
-		Nhat[k] <- sum(z[1:M,k])
+		N[v] <- sum(z[1:M,v])
 	}
-		D <- psi*M/area*10000
-		p1 <- exp(-lambda*sum(p[1:2])*Time)*lambda^n
-		one ~ dbern(p1)
 	
     # Trap history model.
     # and unobserved animal ID.
@@ -96,79 +99,33 @@ code <- nimbleCode({
         # Bernoulli capture history for each call that depends on ID
 		y[i,1:J] ~ dbinom_vector(size = trials[1:J], pkj[ID[i],1:J, occ[i]])
 		# Time of arrival, depends on which traps actually recorded it.
-		toa[i, 1:J] ~ dnorm_vector_marg(mean = expTime[ID[i],1:J, occ[i]], sd = sigmatoa, y = y[i,1:J])
+		toa[i, 1:J] ~ dnorm_vector_marg(mean = expTime[ID[i], 1:J, occ[i]], sd = sigmatoa, y = y[i,1:J])
 		ID[i] ~ dID()
     }
-})
 
-code <- nimbleCode({
-    lambda ~ dunif(0, 10) # Detection rate at distance 0
-    psi ~ dbeta(1, 1)      # Prior on data augmentation bernoulli vec.
-    sigma ~ dunif(0, 10)	# Now the prior is directly on sigma to be consistent with literature.
-    tau2 <- 1/(2*sigma^2)
-	sigmatoa ~ dunif(0,1) #1/sqrt(tautoa)
-	g0 ~ dunif(0, 50)
-    for(i in 1:M) {
-        z[i] ~ dbern(psi)
-        X[i, 1] ~ dunif(xlim[1], xlim[2])
-        X[i, 2] ~ dunif(ylim[1], ylim[2])
-        d2[i,1:J] <- (X[i,1]-traps[1:J,1])^2 + (X[i,2]-traps[1:J,2])^2
-		expTime[i,1:J] <- sqrt(d2[i,1:J])/nu
-        pkj[i,1:J] <- (1-exp(-g0*exp(-d2[i,1:J]*tau2)))
-        # Hazard rate for animal across all traps.
-        Hk[i] <-(1-prod(1-pkj[i,1:J]))*lambda*Time
-		Hkz[i] <- Hk[i]*z[i]
-    }	
-    # Trap history model.
-    # and unobserved animal ID.
-    for(i in 1:n_obs) {
-        # Bernoulli capture history for each call that depends on ID
-		y[i,1:J] ~ dbinom_vector(size = trials[1:J], pkj[ID[i],1:J])
-		# Time of arrival, depends on which traps actually recorded it.
-		toa[i, 1:J] ~ dnorm_vector_marg(mean = expTime[ID[i],1:J], sd = sigmatoa, y = y[i,1:J])
-    }
-	p <- exp(-sum(Hkz[1:M]))*lambda^n_obs
-    one ~ dbern(p)
-    # Predicted population size
-    N <- sum(z[1:M])
-	D <- N/area*10000
+	# Animal Process model:
+	D <- psi*M/area*10000
+	p1 <- exp(-sum(H[1:n_occ]))*lambda^n_obs
+	one ~ dbern(p1)
 })
 
 xlim <- range(mask[,1])
 ylim <- range(mask[,2])
 area <- diff(xlim)*diff(ylim)
-# toa <- capt.all$toa
-# capt <- capt.all$bincapt[,1:6]
-toa <- lightfooti$capt$toa
-capt <- lightfooti$capt$bincapt
-# tmin <- apply(toa, 1, max)
-# keep <- which(tmin > 1200)
-# toa <- toa[keep,]
-# ID <- capt.all$bincapt[, 7]
-# ID <- ID[keep]
-# ID <- as.integer(as.factor(ID))
-# IDBen <- ID
-# capt <- capt[keep,]
-
-# Thin a second time:
-# thin <- 55 # c(24, 29, 45, 55) # potentially 77 + 86 as well.
-# capt <- capt[-thin,]
-# toa <- toa[-thin,]
-# IDBen <- IDBen[-thin]
+toa <- capt.all$toa
+capt <- capt.all$bincapt[,1:6]
+tmin <- apply(toa, 1, max)
+occ <- 1+(tmin > 1200)
+ID <- capt.all$bincapt[, 7]
+ID <- as.integer(as.factor(ID))
+IDBen <- ID
 
 # Constants:
-M <- 300
+M <- 200
 nu <- 330
 J <- nrow(traps)
 n <- nrow(capt)
 Time <- 30
-# mint <- min(toa[toa != 0])
-# toa<- toa - mint + 1	# That add one is to make sure they can't go negative for time of calling.
-# toa <- toa*capt
-# tmink <- tmin[keep] - mint
-
-# tmp <- do.call('rbind', permn(c(0,1,0,1,0,0)))
-# rowSums(tmp)
 
 constants <- list(
     J = J,
@@ -180,13 +137,15 @@ constants <- list(
     n_obs = nrow(capt),
 	trials = rep(1, J),
 	nu = nu,
-	area = area)
+	area = area,
+	n_occ = 2,
+	occ = occ)
 
 data <- list(
 	one = 1,
     y = capt,
 	toa = toa,
-	z = rep(NA, M),
+	z = cbind(rep(NA, M), rep(NA, M)),
 	ID = rep(NA, nrow(capt))
 )
 
@@ -194,31 +153,30 @@ Rmodel <- nimbleModel(code, constants, data, inits = inits())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'g0', 'N', 'D', 'ID'))
+conf$setMonitors(c('psi', 'sigma', 'lambda', 'sigmatoa', 'g0', 'N', 'D', 'ID'))
 
 conf$removeSamplers('X')
-# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'myX', control = list(xlim = xlim, ylim = ylim, J = nrow(traps)))
-for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, 
-	control = list(scale = 0.25, adaptive = FALSE))
-# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
-	# control = list(xlim = xlim, ylim = ylim, scale = 0.25, J = nrow(traps)))
+for(v in 1:2){
+	for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2,', v, ']'), type = 'RW_block', silent = TRUE, 
+		control = list(scale = 0.25, adaptive = FALSE))
+}
 
 conf$removeSamplers('sigmatoa')
 conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
-# conf$addSampler(target = 'sigmatoa', type = 'mySigmaToa', control = list(mi = rowSums(capt), J = J))
-
-# conf$printSamplers()
 
 conf$removeSamplers('z')
-conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
+conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE, 
+	control = list('Noccasion' = 2, 'IDoccasion' = occ))
 
 conf$removeSamplers('ID')
 # Sampler from Chandler and Royle 2013
 # conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
 # New Allocation Sampler.
 # conf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M = M))
-conf$addSampler('ID', type = 'myIDZ', 
-	scalarComponents = TRUE, control = list(M = M, occasion = 1, Noccasion = 1))
+conf$addSampler(paste0('ID[', which(occ == 1) ,']'), type = 'myIDZ', 
+	scalarComponents = TRUE, control = list(M = M, occasion = 1, Noccasion = 2))
+conf$addSampler(paste0('ID[', which(occ == 2) ,']'), type = 'myIDZ', 
+	scalarComponents = TRUE, control = list(M = M, occasion = 2, Noccasion = 2))
 
 # conf$printSamplers()
 
@@ -231,8 +189,8 @@ Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 Cmcmc$run(1000)
 mvSamples <- Cmcmc$mvSamples
 samples <- as.matrix(mvSamples)
-out <- mcmc(samples[-(1:100), c("sigma", "sigmatoa", "lambda", "g0", "N", "D")])
-plot(out)
+out <- mcmc(samples[-(1:100), c("sigma", "sigmatoa", "lambda", "g0","N[1]", "N[2]", "D")])
+plot(out, ask = TRUE)
 summary(out)[[1]]["D", "Mean"]*summary(out)[[1]]["lambda", "Mean"]
 quantile(out[, "D"]*out[, "lambda"], c(0.0275, 0.975))
 
