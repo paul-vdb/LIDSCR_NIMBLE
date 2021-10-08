@@ -15,14 +15,14 @@ rX <- nimbleFunction(
 
 # Stupid holder function for sampling ID.
 dID <- nimbleFunction(
-    run = function(x = integer(0), log = integer(0, default = 0)) {
+    run = function(x = integer(0), lam = double(0), log = integer(0, default = 0)) {
         returnType(double(0))
-		if(log) return(0) else return(1)
+		if(log) return(log(lam)) else return(lam)
     }
 )
 
 rID <- nimbleFunction(
-    run = function(n = integer(0)) {
+    run = function(n = integer(0), lam = double(0)) {
         print('Error: rX() function not implemented')
         returnType(integer(0))
         return(1)
@@ -110,8 +110,9 @@ dMarg <- nimbleFunction(
 registerDistributions(
     list(dX = list(BUGSdist = 'dX()',
                    types = c('value = double(1)')),
-		 dID = list(BUGSdist = 'dID()',
-                   types = c('value = integer(0)')),
+		 dID = list(BUGSdist = 'dID(lam)',
+                   types = c('value = integer(0)', 
+						'lam = double(0)')),
 		 dbinom_vector_ascr = list(BUGSdist = 'dbinom_vector_ascr()',
 				   types =c('value = double(1)')),
 		 dnorm_vector_marg = list(BUGSdist = 'dnorm_vector_marg(mean, sd, y)',
@@ -177,10 +178,16 @@ sampler_myX2 <- nimbleFunction(
     setup = function(model, mvSaved, target, control) {
         xlim <- control$xlim
         ylim <- control$ylim
+		nv <- extractControlElement(control, 'Noccasion', 1)		
+		v <- extractControlElement(control, 'occasion', 1)		
         calcNodesAll <- model$getDependencies(target)
         nodeIndex <- as.numeric(gsub("\\D*(\\d+).*", '\\1', target))
-        zNode <- paste0('z[', nodeIndex, ']')
-		scale <- control$scale
+        if(nv == 1){
+			zNode <- paste0('z[', nodeIndex, ']')
+		}else{
+			zNode <- paste0('z[', nodeIndex, ',', v,']')
+		}		
+		scale <- extractControlElement(control, 'scale', 1)		
     },
     run = function() {
 		if((model[[zNode]] == 0)) {
@@ -308,7 +315,7 @@ sampler_mySPIM <- nimbleFunction(
         isStochCalcNodesNoSelf <- model$isStoch(calcNodesNoSelf)
         calcNodesNoSelfDeterm <- calcNodesNoSelf[!isStochCalcNodesNoSelf]
         calcNodesNoSelfStoch <- calcNodesNoSelf[isStochCalcNodesNoSelf]
-        k <- control$M
+        M <- control$M
         probs <- numeric(k)
         logProbs <- numeric(k)
 		cannotlink <- extractControlElement(control, 'cannotlink', 'identity')	# n x n matrix where a 1 indicates i cannot link to detection j.
@@ -324,34 +331,34 @@ sampler_mySPIM <- nimbleFunction(
 		if(n_currentValue == n_grp)
 		{
 			model[['z']][currentValue] <<- 0
+			logProbs[currentValue] <<- logProbs[currentValue] + log(psi)-model[['Hk']][currentValue]
 		}
-        for(i in 1:k) {
-			if(i != currentValue){
-				if(model[['z']][i] == 1) {
-					nk <- sum(model[['ID']] == i)
+        for(k in 1:M {
+			if(k != currentValue){
+				if(model[['z']][k] == 1) {
+					nk <- sum(model[['ID']] == k)
 					if(nk == 0)
 					{
-						logProbs[i] <<- -Inf
+						logProbs[k] <<- -Inf
 					}else {
-						no_link <- sum(cannotlink[model[['ID']] == i, nodeIndex])	# This is the check to see if there are cannot links.
+						no_link <- sum(cannotlink[model[['ID']] == k, nodeIndex])	# This is the check to see if there are cannot links.
 						if(no_link > 0)
 						{
-							logProbs[i] <<- -Inf
+							logProbs[k] <<- -Inf
 						}else {
-							values(model, targetNodesAsScalar) <<- rep(i, n_grp) 					
-							logProbs[i] <<- model$calculate(calcNodes)
-							if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
+							values(model, targetNodesAsScalar) <<- rep(k, n_grp) 					
+							logProbs[k] <<- model$calculate(calcNodes) + log(1-psi)
+							if(is.nan(logProbs[k])) logProbs[k] <<- -Inf
 						}
 					}
 				}else {
-					values(model, targetNodesAsScalar) <<- rep(i, n_grp)				
-					logProbs[i] <<- model$calculate(calcNodes)
-					if(is.nan(logProbs[i])) logProbs[i] <<- -Inf
+					values(model, targetNodesAsScalar) <<- rep(k, n_grp)
+					logProbs[k] <<- model$calculate(calcNodes) + log(psi)-model[['Hk']][k]
+					if(is.nan(logProbs[k])) logProbs[k] <<- -Inf
 				}
             }
         }
 		# Note that logProbs of z=1 and nk=0 is -Inf, or it had better be!y
-		logProbs <<- logProbs + model[['z']]*log(1-psi) + (1-model[['z']])*(log(psi)-model[['Hk']])
         logProbs <<- logProbs - max(logProbs)
         probs <<- exp(logProbs)
         newValue <- rcat(1, probs)
@@ -430,7 +437,6 @@ sampler_myIDZ <- nimbleFunction(
         probs <- numeric(M)
         logProbs <- numeric(M)
 	    nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', target))
-		zAdjust <- numeric(M)
     },
     run = function() {
 		psi <- model[['psi']]
@@ -439,26 +445,26 @@ sampler_myIDZ <- nimbleFunction(
 		n_currentValue <- sum(model[['ID']] == currentValue)
 		if(n_currentValue == 1)
 		{
-			zAdjust[currentValue] <<- 1
+			logProbs[currentValue] <<- logProbs[currentValue] + log(psi) - model[[Hkv]][currentValue]
 			model[[zNodes]][currentValue] <<- 0
 		}
         for(k in 1:M) {
 			if(k != currentValue){
-				if((sum(model[['ID']] == k) == 0 & model[[zNodes]][k] == 1))
+				if((sum(model[['ID']] == k) == 0) & (model[[zNodes]][k] == 1))
 				{
 					logProbs[k] <<- -Inf
-					zAdjust[k] <<- 0
 				}else {
 					model[[target]] <<- k
 					logProbs[k] <<- model$calculate(calcNodes)
-					if(is.nan(logProbs[k])) logProbs[k] <<- -Inf
-					
-					# Keep track of which ones are existing or not.
-					zAdjust[k] <<- 1-model[[zNodes]][k]
+					if(is.nan(logProbs[k])){
+						logProbs[k] <<- -Inf
+					}else{
+						# Keep track of which ones are existing or not.
+						logProbs[k] <<- logProbs[k] + (1-model[[zNodes]][k])*(log(psi)-model[[Hkv]][k]) + model[[zNodes]][k]*log(1-psi)
+					}
 				}
 			}
         }
-		logProbs <<- logProbs + (1-zAdjust)*log(1-psi) + zAdjust*(log(psi)-model[[Hkv]])
         logProbs <<- logProbs - max(logProbs)
         probs <<- exp(logProbs)
         newValue <- rcat(1, probs)
@@ -473,7 +479,7 @@ sampler_myIDZ <- nimbleFunction(
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
         } else {
-			model[[zNodes]][newValue] <<- 1
+			model[[zNodes]][currentValue] <<- 1
             nimCopy(from = mvSaved, to = model, row = 1, nodes = c(target, zNodes), logProb = TRUE)
             nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
             nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)

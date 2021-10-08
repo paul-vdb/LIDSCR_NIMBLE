@@ -17,12 +17,12 @@ registerDoParallel(cl)
 source("SimData.R")
 load("../data/stacked-lightfooti.Rdata")
 
-results <- foreach(h=1:100, .export = c("simASCR"),
+results <- foreach(h=1:100,
 			.packages = c("coda", "nimbleSCR", "nimble"))%dopar%{
 	source("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/code/NimbleFunctions.R")
 
 	### Scenario 1:
-	dat <- simASCR(N = 60, sigma = 2.5, sigma_toa = 0.0007, g0 = 5, lambda = 0.3, 
+	dat <- simASCR(N = 60, sigma = 2.3, sigma_toa = 0.00055, g0 = 5.75, lambda = 0.27, 
 		StudyPeriod = 30, traps = traps, 
 		limits = list(xlim = range(mask[,1]), ylim = range(mask[,2])))
 
@@ -135,10 +135,10 @@ results <- foreach(h=1:100, .export = c("simASCR"),
 
 	conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'g0', 'N', 'D', 'ID'))
 
-	conf$removeSamplers('X')
+	# conf$removeSamplers('X')
 	# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 0.05, adaptive = FALSE))
-	for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
-		control = list(xlim = xlim, ylim = ylim, scale = 0.25, J = nrow(traps)))
+	# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'sampler_myX2', silent = TRUE, 
+		# control = list(xlim = xlim, ylim = ylim, scale = 0.25, J = nrow(traps)))
 
 	conf$removeSamplers('sigmatoa')
 	conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE))
