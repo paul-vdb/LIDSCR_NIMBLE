@@ -115,6 +115,11 @@ data.sc <- list(
 SCModel <- nimbleModel(SpatialCountAlg2, constants.sc, data.sc)
 SCconf <- configureMCMC(SCModel)
 SCconf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D'))
+
+SCconf$removeSamplers('sigma')
+SCconf$addSampler(target = 'sigma', 
+	type = 'RW', silent = TRUE, control = list(adaptive = FALSE, scale = 0.1))
+
 # Use a block update on locations. Saves time.
 SCconf$removeSamplers('X')
 for(i in 1:M) SCconf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE, control = list(scale = 1.7, adaptive = FALSE))
@@ -134,6 +139,12 @@ samples.sc <- runMCMC(SCCmcmc, 30000, nburnin = 10000, nchains = 3, thin = 1)
 out.sc <- mcmc.list(list(as.mcmc(samples.sc[[1]]), as.mcmc(samples.sc[[2]]), as.mcmc(samples.sc[[3]])))
 plot(out.sc[,c("N", "sigma", "lambda", "psi")])
 plot(out.sc[,c("N", "D", "sigma")])
+summary(out.sc)
+effectiveSize(out.sc)
+stat <- NULL
+for( i in c('sigma', 'lambda', 'psi', 'N', 'D')) stat[[i]] = gelman.diag(mcmc.list(list(out.sc[[1]][,i], out.sc[[2]][,i], out.sc[[3]][,i] )))
+
+
 # save(out.sc, file = "../output/fisher_sc.Rda")
 # load("../output/fisher_sc.Rda")
 
@@ -180,9 +191,9 @@ inits <- function(){
     )
 }
 
-###############################
+######################################
 # Chandler and Royle 2013 Algorithm 1:
-###############################
+######################################
 MPPModel <- nimbleModel(SC_MPP, constants.mpp, data.mpp, inits = inits())
 MPPconf <- configureMCMC(MPPModel)
 MPPconf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D', 'ID'))
@@ -193,6 +204,11 @@ for(i in 1:M){
 	MPPconf$addSampler(target = paste0('X[', i, ', 1:2]'), 
 		type = 'RW_block', silent = TRUE, control = list(scale = 1.7, adaptive = FALSE))
 	}
+
+MPPconf$removeSamplers('sigma')
+MPPconf$addSampler(target = 'sigma', 
+	type = 'RW', silent = TRUE, control = list(adaptive = FALSE, scale = 0.1))
+
 # Optimized z sampler
 MPPconf$removeSamplers('z')
 MPPconf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
@@ -205,14 +221,14 @@ MPPRmcmc <- buildMCMC(MPPconf)
 MPPCmodel <- compileNimble(MPPModel)
 MPPCmcmc <- compileNimble(MPPRmcmc, project = MPPModel)
 
-MPPCmcmc$run(10000)
-mvSamples <- MPPCmcmc$mvSamples
-samples <- as.matrix(mvSamples)
-out <- mcmc(samples)
-plot(out[,c('sigma', 'lambda', 'N', 'D')])
-post.id <- samples[,grep("ID", colnames(samples))]
-NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
-which(NActive > samples[,'N'])
+# MPPCmcmc$run(10000)
+# mvSamples <- MPPCmcmc$mvSamples
+# samples <- as.matrix(mvSamples)
+# out <- mcmc(samples)
+# plot(out[,c('sigma', 'lambda', 'N', 'D')])
+# post.id <- samples[,grep("ID", colnames(samples))]
+# NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
+# which(NActive > samples[,'N'])
 
 
 
@@ -239,6 +255,11 @@ save(out.mpp.alg1, file = "../output/fisher_MPP_Alg1.Rda")
 MPPModel <- nimbleModel(SC_MPP, constants.mpp, data.mpp, inits = inits())
 MPPconf <- configureMCMC(MPPModel)
 MPPconf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D', 'ID'))
+
+MPPconf$removeSamplers('sigma')
+MPPconf$addSampler(target = 'sigma', 
+	type = 'RW', silent = TRUE, control = list(adaptive = FALSE, scale = 0.1))
+
 # Use a block update on locations. Saves time.
 # Turn off adaptive samping and fix the scale of the sampler to something reasonable.
 MPPconf$removeSamplers('X')
@@ -256,19 +277,19 @@ MPPRmcmc <- buildMCMC(MPPconf)
 MPPCmodel <- compileNimble(MPPModel)
 MPPCmcmc <- compileNimble(MPPRmcmc, project = MPPModel)
 
-MPPCmcmc$run(10000)
+# MPPCmcmc$run(1000)
 # MPPconf$printSamplers()
 # scales <- NULL
 # for(i in 1:M){
 	# scales <- c(scales,valueInCompiledNimbleFunction(MPPCmcmc$samplerFunctions[[3+i]], "scale"))
 # }
-mvSamples <- MPPCmcmc$mvSamples
-samples <- as.matrix(mvSamples)
-out <- mcmc(samples[-(1:5000),])
-plot(out[,c('sigma', 'lambda', 'D', 'N')])
-post.id <- samples[,grep("ID", colnames(samples))]
-NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
-hist(NActive - samples[,'N'])
+# mvSamples <- MPPCmcmc$mvSamples
+# samples <- as.matrix(mvSamples)
+# out <- mcmc(samples)
+# plot(out[,c('sigma', 'lambda', 'D', 'N')])
+# post.id <- samples[,grep("ID", colnames(samples))]
+# NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
+# hist(NActive - samples[,'N'])
 
 samples.mpp <- runMCMC(MPPCmcmc, 30000, nburnin = 10000, nchains = 3, 
 	thin = 1, inits = list(inits(), inits(), inits()))
@@ -283,6 +304,12 @@ NActive3 <- apply(post.id.3, 1, FUN = function(x){ length(unique(x))})
 out.mpp <- mcmc.list(list(as.mcmc(cbind(samples.mpp[[1]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "NActive" = NActive1)), 
 	as.mcmc(cbind(samples.mpp[[2]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "NActive" =  NActive2)),
 	as.mcmc(cbind(samples.mpp[[3]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "NActive" = NActive3))))
+
+effectiveSize(out.mpp)
+stat <- NULL
+for( i in c('sigma', 'lambda', 'psi', 'N', 'D', 'NActive')) stat[[i]] = gelman.diag(mcmc.list(list(out.mpp[[1]][,i], out.mpp[[2]][,i], out.mpp[[3]][,i] )))
+summary(out.mpp)
+plot(out.mpp, ask = TRUE)
 
 # save(out.mpp, file = "../output/fisher_mpp.Rda")
 # load("../output/fisher_mpp.Rda")
@@ -329,9 +356,15 @@ initsSPIM <- function(){
 MPPModel <- nimbleModel(SC_MPP, constants.mpp, data.mpp, inits = initsSPIM())
 MPPconf <- configureMCMC(MPPModel)
 MPPconf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D', 'ID'))
+
+MPPconf$removeSamplers('sigma')
+MPPconf$addSampler(target = 'sigma', 
+	type = 'RW', silent = TRUE, control = list(adaptive = FALSE, scale = 0.1))
+
 # Use a block update on locations. Saves time.
 MPPconf$removeSamplers('X')
-for(i in 1:M) MPPconf$addSampler(target = paste0('X[', i, ', 1:2]'), type = 'RW_block', silent = TRUE)
+for(i in 1:M) MPPconf$addSampler(target = paste0('X[', i, ', 1:2]'), 
+	type = 'RW_block', silent = TRUE, control = list(adaptive = FALSE, scale = 1.7))
 # Optimized z sampler
 MPPconf$removeSamplers('z')
 MPPconf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
@@ -353,6 +386,10 @@ MPPCmcmc <- compileNimble(MPPRmcmc, project = MPPModel)
 # out <- mcmc(samples[-(1:5000),])
 # plot(out[,c('N', 'D', 'sigma', 'lambda')])
 
+# Doesn't look great with adaptive sampling of 0.028...
+# Let's tune with 0.1
+# valueInCompiledNimbleFunction(MPPCmcmc$samplerFunctions[[3]], "scale")
+
 # post.id <- samples[-(1:5000),grep("ID", colnames(samples))]
 # NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
 # plot(NActive)
@@ -371,8 +408,11 @@ NActive3 <- apply(post.id.3, 1, FUN = function(x){ length(unique(x))})
 out.spim <- mcmc.list(list(as.mcmc(cbind(samples.spim[[1]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "NActive" = NActive1)), 
 	as.mcmc(cbind(samples.spim[[2]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "NActive" =  NActive2)),
 	as.mcmc(cbind(samples.spim[[3]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "NActive" = NActive3))))
-plot(out.spim)
+plot(out.spim[, c('D', 'NActive', 'sigma')])
 summary(out.spim)
+effectiveSize(out.spim)
+stat <- NULL
+for( i in c('sigma', 'lambda', 'psi', 'N', 'D', 'NActive')) stat[[i]] = gelman.diag(mcmc.list(list(out.spim[[1]][,i], out.spim[[2]][,i], out.spim[[3]][,i] )))
 save(out.spim, file =  "../output/fisher_spim.Rda")
 load("../output/fisher_spim.Rda")
 plot(out.spim[,c('NActive')])
@@ -391,3 +431,42 @@ plot(out.mpp[,c('N', 'D', 'sigma')])
 dev.new()
 plot(out.spim[,c('N', 'D')])
 plot(out.spim[,c('sigma', 'lambda')])
+
+
+#########################################
+# Incorporating the Marks sex and collar
+#########################################
+SC_MPP2 <- nimbleCode({
+    lambda ~ dunif(0, 20) # Detection rate at distance 0
+    psi ~ dbeta(1, 1)      # prior on data augmentation bernoulli vec.
+    sigma ~ dunif(0, 50)	# Now the prior is directly on sigma to be consistent with literature.
+    tau2 <- 1/(2*sigma^2)	# Just avoid that extra computation for each animal...
+	psex <- dbeta(1, 1)
+    for(k in 1:M) {
+        z[k] ~ dbern(psi)
+		sex[k] ~ dbern(psex)
+        X[k, 1] ~ dunif(xlim[1], xlim[2])
+        X[k, 2] ~ dunif(ylim[1], ylim[2])
+        d2[k,1:J] <- (X[k,1]-traps[1:J,1])^2 + (X[k,2]-traps[1:J,2])^2
+        pkj[k,1:J] <- exp(-d2[k,1:J]*tau2)
+        # Hazard rate for animal across all traps.
+        Hk[k] <- sum(pkj[k,1:J])*Time*lambda
+		pkz[k] <- exp(-Hk[k]*z[k])	# Only put z here for purposes of node dependence and speed.
+		zones[k] ~ dbern(pkz[k])
+   }
+
+    # Trap history model.
+    # and unobserved animal ID.
+    for(i in 1:n_obs) {
+        # trap probability given ID:
+        # This one can certainly be just the ones trick for trap y[i].
+		obsex ~ dIndicator(indicator = sex[ID[i]])
+		pobs[i] <- pkj[ID[i], omega[i]]
+        ones[i] ~ dbern(pobs[i])
+		ID[i] ~ dID(lam = lambda)	# Dummy distribution to declare this as stochastic and mulitply by lambda.
+    }
+	
+    # Predicted population size
+    N <- sum(z[1:M])
+	D <- N/area
+})

@@ -111,12 +111,11 @@ registerDistributions(
     list(dX = list(BUGSdist = 'dX()',
                    types = c('value = double(1)')),
 		 dID = list(BUGSdist = 'dID(lam)',
-                   types = c('value = integer(0)', 
-						'lam = double(0)')),
+                   types = c('value = integer(0)', 'lam = double(0)')),
 		 dbinom_vector_ascr = list(BUGSdist = 'dbinom_vector_ascr()',
 				   types =c('value = double(1)')),
 		 dnorm_vector_marg = list(BUGSdist = 'dnorm_vector_marg(mean, sd, y)',
-				   types = c('value = double(1)', 'mean = double(1)', 'sd = double(0)', 'y = double(1)'))		   
+				   types = c('value = double(1)', 'mean = double(1)', 'sd = double(0)', 'y = double(1)'))
 				   ) )
 
 
@@ -316,8 +315,8 @@ sampler_mySPIM <- nimbleFunction(
         calcNodesNoSelfDeterm <- calcNodesNoSelf[!isStochCalcNodesNoSelf]
         calcNodesNoSelfStoch <- calcNodesNoSelf[isStochCalcNodesNoSelf]
         M <- control$M
-        probs <- numeric(k)
-        logProbs <- numeric(k)
+        probs <- numeric(M)
+        logProbs <- numeric(M)
 		cannotlink <- extractControlElement(control, 'cannotlink', 'identity')	# n x n matrix where a 1 indicates i cannot link to detection j.
         nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', targetNodesAsScalar[1]))
 		n_grp <- length(targetNodesAsScalar)
@@ -333,7 +332,7 @@ sampler_mySPIM <- nimbleFunction(
 			model[['z']][currentValue] <<- 0
 			logProbs[currentValue] <<- logProbs[currentValue] + log(psi)-model[['Hk']][currentValue]
 		}
-        for(k in 1:M {
+        for(k in 1:M) {
 			if(k != currentValue){
 				if(model[['z']][k] == 1) {
 					nk <- sum(model[['ID']] == k)
@@ -450,18 +449,26 @@ sampler_myIDZ <- nimbleFunction(
 		}
         for(k in 1:M) {
 			if(k != currentValue){
-				if((sum(model[['ID']] == k) == 0) & (model[[zNodes]][k] == 1))
-				{
-					logProbs[k] <<- -Inf
-				}else {
-					model[[target]] <<- k
-					logProbs[k] <<- model$calculate(calcNodes)
-					if(is.nan(logProbs[k])){
+				# Start with check if it can match and assign 0 to 1 prob or 1 already prob.
+				if(model[[zNodes]][k] == 0){
+					logProbs[k] <<- log(psi)-model[[Hkv]][k]				
+				}else{
+					if(sum(model[['ID']] == k) == 0){
 						logProbs[k] <<- -Inf
 					}else{
-						# Keep track of which ones are existing or not.
-						logProbs[k] <<- logProbs[k] + (1-model[[zNodes]][k])*(log(psi)-model[[Hkv]][k]) + model[[zNodes]][k]*log(1-psi)
+						logProbs[k] <<- log(1-psi)
 					}
+				}
+				# If it is not a zero-inflated value then find the full conditional.
+				if(logProbs[k] != -Inf)
+				{
+					model[[target]] <<- k
+					logProbs[k] <<- logProbs[k] + model$calculate(calcNodes)		
+				}
+				
+				# If it's a bad number make it zero.
+				if(is.nan(logProbs[k])){
+						logProbs[k] <<- -Inf
 				}
 			}
         }
