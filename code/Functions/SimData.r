@@ -1,4 +1,4 @@
-simSCR <- function(N = 50, sigma = 0.5, lambda = 0.5, StudyPeriod = 25, traps, limits, size = c(22, 5, 0.75), psex = 0.5)
+simSCR <- function(N = 50, NCollar = c(0,0), sigma = 0.5, lambda = 0.5, StudyPeriod = 25, traps, limits, size = c(22, 5, 0.75), psex = 0.5)
 {
     locs <- cbind(x = runif(N, limits[['xlim']][1], limits[['xlim']][2]), 
                   y = runif(N, limits[['ylim']][1], limits[['ylim']][2]))
@@ -17,10 +17,21 @@ simSCR <- function(N = 50, sigma = 0.5, lambda = 0.5, StudyPeriod = 25, traps, l
         # Now assign those detection times to a trap.
         obs <- sample(J, nk, prob = hkj/hk, replace = TRUE)
         size.i <- rnorm(1, size[1], size[2])
-        capt.hist <- rbind(capt.hist, data.frame('t_obs' = ti, 'trap_obs' = obs, 'ID' = ID, 
+		capt.hist.i <- data.frame('t_obs' = ti, 'trap_obs' = obs, 'ID' = ID, 
                                                  'size' = rnorm(nk, size.i, size[3]), 
 												'sex' = rbinom(1, 1, psex),
-												'tru_x' = as.numeric(locs[i,1]), 'tru_y' = as.numeric(locs[i,2])))
+												'tru_x' = as.numeric(locs[i,1]), 'tru_y' = as.numeric(locs[i,2]))
+        if(i <= sum(NCollar)){
+			if(i <= NCollar[1]) {
+				capt.hist.i$sex <- 0
+			}else{
+				capt.hist.i$sex <- 1
+			}
+			capt.hist.i$collar <- 1
+		}else{
+			capt.hist.i$collar <- 0
+		}
+		capt.hist <- rbind(capt.hist, capt.hist.i)
         ID <- ID + 1
     }
     capt.hist

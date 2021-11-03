@@ -2,7 +2,7 @@
 # SCR as a Marked Poisson Process
 # Completely latent ID model
 #################################
-
+# setwd("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/code/FrogExample")
 library(sp)
 library(coda)
 library(raster)
@@ -13,11 +13,10 @@ library(ggplot2)
 library(secr)
 library(ascr)
 
-source("NimbleFunctions.R")
-source("SimData.R")
+source("../Functions/NimbleFunctions.R")
+source("../Functions/SimData.R")
 
-
-load("../data/stacked-lightfooti.Rdata")
+load("../../data/stacked-lightfooti.Rdata")
 
 # Change the mask to finer resolution:
 # traps2 <-convert.traps(lightfooti$traps)
@@ -87,11 +86,13 @@ code <- nimbleCode({
 			# Hazard rate for animal across all traps.
 			Hk[k,v] <-(1-prod(1-pkj[k,1:J,v]))*lambda*Time
 			pkz[k,v] <- exp(-Hk[k,v]*z[k,v])
-			ones[k,v] ~ dbern(pkz[k,v])
+			zones[k,v] ~ dbern(pkz[k,v])
 		}
 		# Predicted population size
 		N[v] <- sum(z[1:M,v])
 	}
+	
+	pID[1:M, 1:n_occ] <- z[1:M,1:n_occ]*lambda
 	
 	# Trap history model.
 	# and unobserved animal ID.
@@ -102,7 +103,7 @@ code <- nimbleCode({
 		toa[i, 1:J] ~ dnorm_vector_marg(mean = expTime[ID[i], 1:J, occ[i]], sd = sigmatoa, y = y[i,1:J])
 		# The likelihood needs to be multiplied by lambda for each detection and
 		# I need ID to be a stochastic node. 2 birds...
-		ID[i] ~ dID(lam = lambda)
+		ID[i] ~ dID(pID = pID[1:M, occ[i]])
 	}
 
 	# Derived Variables.
@@ -149,7 +150,7 @@ constants <- list(
 	mi = rowSums(capt))
 
 data <- list(
-	ones = cbind(rep(1,M), rep(1,M)),
+	zones = cbind(rep(1,M), rep(1,M)),
     y = capt,
 	toa = toa,
 	z = cbind(rep(NA, M), rep(NA, M)),
@@ -160,30 +161,15 @@ Rmodel <- nimbleModel(code, constants, data, inits = inits())
 
 conf <- configureMCMC(Rmodel)
 
-conf$setMonitors(c('psi', 'sigma', 'lambda', 'sigmatoa', 'g0', 'N', 'D', 'ID', 'expTime'))
+conf$setMonitors(c('psi', 'sigma', 'lambda', 'sigmatoa', 'g0', 'N', 'D', 'ID'))
 
-# conf$removeSamplers('X')
-# for(v in 1:2){
-	# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2,', v, ']'), type = 'RW_block', silent = TRUE, 
-		# control = list(scale = 1, adaptive = TRUE))
-# }
-# conf$removeSamplers('X')
-# for(v in 1:2){
-	# for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2,', v, ']'), type = 'sampler_myX2', silent = TRUE, 
-		# control = list(xlim = xlim, ylim = ylim, scale = 1, Noccasion = 2, occasion = v))
-# }
 conf$removeSamplers('X')
 for(v in 1:2){
 	for(i in 1:M) {
 		conf$addSampler(target = paste0('X[', i, ', 1:2,', v, ']'), type = 'RW_block', silent = TRUE, 
-			control = list(scale = 0.01, adaptive = FALSE))
-		conf$addSampler(target = paste0('X[', i, ', 1:2,', v, ']'), type = 'RW_block', silent = TRUE, 
-			control = list(scale = 3, adaptive = FALSE))
+			control = list(scale = 2, adaptive = FALSE))
 	}	
 }
-
-conf$removeSamplers('sigmatoa')
-conf$addSampler(target = 'sigmatoa', type = 'RW', control = list(log = TRUE, adaptive = TRUE))
 
 conf$removeSamplers('z')
 conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE, 
@@ -191,15 +177,7 @@ conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE,
 
 conf$removeSamplers('ID')
 # Sampler from Chandler and Royle 2013
-# conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
-# New Allocation Sampler.
-# conf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M = M))
-conf$addSampler(paste0('ID[', which(occ == 1) ,']'), type = 'myIDZ', 
-	scalarComponents = TRUE, control = list(M = M, occasion = 1, Noccasion = 2))
-conf$addSampler(paste0('ID[', which(occ == 2) ,']'), type = 'myIDZ', 
-	scalarComponents = TRUE, control = list(M = M, occasion = 2, Noccasion = 2))
-
-# conf$printSamplers()
+conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
 
 Rmcmc <- buildMCMC(conf)
 
@@ -207,47 +185,55 @@ Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
 # Make sure it runs...
-Cmcmc$run(25000)
-mvSamples <- Cmcmc$mvSamples
-samples <- as.matrix(mvSamples)
-out <- mcmc(samples[-(1:5000), c("psi", "sigma", "sigmatoa", "lambda", "g0","N[1]", "N[2]", "D")])
-plot(out, ask = TRUE)
-summary(out)[[1]]["D", "Mean"]*summary(out)[[1]]["lambda", "Mean"]*60
-quantile(out[, "D"]*out[, "lambda"]*60, c(0.0275, 0.975))
+# Cmcmc$run(25000)
+# mvSamples <- Cmcmc$mvSamples
+# samples <- as.matrix(mvSamples)
+# out <- mcmc(samples[-(1:5000), c("psi", "sigma", "sigmatoa", "lambda", "g0","N[1]", "N[2]", "D")])
+# plot(out, ask = TRUE)
+# summary(out)[[1]]["D", "Mean"]*summary(out)[[1]]["lambda", "Mean"]*60
+# quantile(out[, "D"]*out[, "lambda"]*60, c(0.0275, 0.975))
 
-post.id <- samples[-(1:5000),grep("ID", colnames(samples))]
-post.id1 <- post.id[,occ == 1]
-post.id2 <- post.id[,occ == 2]
-NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
-NActive1 <- apply(post.id1, 1, FUN = function(x){ length(unique(x))})
-NActive2 <- apply(post.id2, 1, FUN = function(x){ length(unique(x))})
-par(mfrow = c(2,2))
-hist(NActive1)
-hist(NActive2)
-hist(samples[-(1:5000),"N[1]"])
-hist(samples[-(1:5000),"N[2]"])
+# post.id <- samples[-(1:5000),grep("ID", colnames(samples))]
+# post.id1 <- post.id[,occ == 1]
+# post.id2 <- post.id[,occ == 2]
+# NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
+# NActive1 <- apply(post.id1, 1, FUN = function(x){ length(unique(x))})
+# NActive2 <- apply(post.id2, 1, FUN = function(x){ length(unique(x))})
+# par(mfrow = c(2,1))
+# hist(NActive1)
+# abline(v = 14, col = 'red')
+# hist(NActive2)
+# abline(v = 11, col = 'red')
+
+# par(mfrow = c(2,1))
+# hist(samples[-(1:5000),"N[1]"])
+# hist(samples[-(1:5000),"N[2]"])
 
 
-ind  <- 20
-out.meanTime <- samples[-(1:5000), grep(paste0("meanTime\\[", ind), colnames(samples))]
-delta <- t(apply(out.meanTime, 1, FUN = function(x){toa[ind,] - x}))
-delta.mean <- apply(delta, 1, FUN = function(x){mean(x[capt[ind,]==1])})
-tmp <- sweep(delta, 1, delta.mean)
-ssq <- apply(tmp^2, 1, sum)
-hist(ssq)
+# plot(density(as.numeric(out[,"D"])), main = "Frogs", xlab = "D (Ind/Ha)")
+# abline(v = c(358), col = 'red')
+# abline(v = c(240,534), col = 'grey')
 
-mcmc.out <- runMCMC(Cmcmc, nburnin = 10000, niter = 30000, nchains = 3, 
+mcmc.out <- runMCMC(Cmcmc, nburnin = 20000, niter = 50000, nchains = 3, 
 	inits = list(inits(), inits(), inits()))	
 
-out <- as.mcmc.list(list(mcmc(mcmc.out[[1]])[, c("psi", "sigma", "sigmatoa", "lambda", "g0", "N[1]", "N[2]", "D")], 
-	mcmc(mcmc.out[[2]])[, c("psi", "sigma", "sigmatoa", "lambda", "g0", "N[1]", "N[2]", "D")], 
-	mcmc(mcmc.out[[3]])[, c("psi", "sigma", "sigmatoa", "lambda", "g0", "N[1]", "N[2]", "D")]))
+out.list <- list()
+for( i in 1:3 )
+{
+	post.id <- mcmc.out[[i]][,grep("ID", colnames(mcmc.out[[i]]))]
+	post.id1 <- post.id[,occ == 1]
+	post.id2 <- post.id[,occ == 2]
+	NActive  <- apply(post.id, 1, FUN = function(x){ length(unique(x))})	
+	NActive1 <- apply(post.id1, 1, FUN = function(x){ length(unique(x))})
+	NActive2 <- apply(post.id2, 1, FUN = function(x){ length(unique(x))})
+	out.list[[i]] <- mcmc(cbind(mcmc.out[[i]][, c("psi", "sigma", "sigmatoa", "lambda", "g0", "N[1]", "N[2]", "D")], K = NActive, K1 = NActive1, K2 = NActive2))
+}
+out <- as.mcmc.list(out.list)
 summary(out)
 plot(out, ask = TRUE)
-save(out, file = "../output/FrogsLatentID2Session.Rda")
-save(out, file = "../output/FrogsLatentID2Session_tune3.Rda")
-load("../output/FrogsLatentID2Session.Rda")
-load("../output/FrogsLatentID2Session_tune3.Rda")
+# save(out, file = "../../output/FrogsLatentID2Session_HOLYSHITITWORKED.Rda")
+save(out, file = "../../output/FrogsLatentID2Session.Rda")
+load( "../../output/FrogsLatentID2Session.Rda")
 
 ###########
 # Known ID ASCR from Stevenson 2020
@@ -366,8 +352,7 @@ conf$setMonitors(c('sigma', 'lambda', 'sigmatoa', 'g0', 'N', 'D'))
 
 conf$removeSamplers('X')
 for(v in 1:2){
-	for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2,', v, ']'), type = 'RW_block', silent = TRUE, 
-		control = list(scale = 0.25, adaptive = FALSE))
+	for(i in 1:M) conf$addSampler(target = paste0('X[', i, ', 1:2,', v, ']'), type = 'RW_block', silent = TRUE)
 }
 
 conf$removeSamplers('sigmatoa')
@@ -396,8 +381,8 @@ out.id <- as.mcmc.list(list(mcmc(mcmc.out.id[[1]])[, c("sigma", "sigmatoa", "lam
 summary(out.id)
 plot(out.id, ask = TRUE)
 
-save(out.id, file = "../output/FrogsKnownID2Session.Rda")
-load("../output/FrogsKnownID2Session.Rda")
+save(out.id, file = "../../output/FrogsKnownID2Session.Rda")
+load("../../output/FrogsKnownID2Session.Rda")
 
 ###################
 library(lattice)
