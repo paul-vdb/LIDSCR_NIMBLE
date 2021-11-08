@@ -10,9 +10,6 @@ library(nimble)
 library(nimbleSCR)
 
 source("NimbleFunctions.R")
-# edf <- read.csv("C:/Users/Paul/Documents/Advising/FisherDataProcessing/edf.csv", header = TRUE, sep = ",", check.names = FALSE) ## NEED CHECK.NAMES = FALSE otherwise 3d will not work
-# tmp <-edf[!duplicated(edf$individualID_2016),]
-# table(tmp$sex)
 ## Load the Fisher data
 ###--- set directory and load files
 load("../data/FisherData.Rda")
@@ -110,52 +107,42 @@ plot(out.sc[,c("N", "sigma", "lambda", "psi")])
 plot(out.sc[,c("N", "D", "sigma")])
 summary(out.sc)
 
-####################################
-# Sex and collar as fixed covariates
-####################################
-# van Dam-Bates Spatial Count Model using the Marked Poisson process formulation.
-SC_MPP_sex_collar <- nimbleCode({
+# Marked Poisson process model incorporating the 
+# latent ID variable as unknown. 
+# This is equivalent to the Spatial Count model but using
+# my new framework with the event being the single detection.
+#------------------------------------------------
+ModelMPP <- nimbleCode({
     lambda ~ dunif(0, 20) # Detection rate at distance 0
     psi ~ dbeta(1, 1)      # prior on data augmentation bernoulli vec.
     sigma ~ dunif(0, 50)	# Now the prior is directly on sigma to be consistent with literature.
-    tau2<- 1/(2*sigma^2)	# Just avoid that extra computation for each animal...
-	psex ~ dbeta(1,1)
-	# For the collared individuals, we know the sex too! It's actually observed :)
-	for(k in 1:n_collar) {
+    tau2 <- 1/(2*sigma^2)	# Just avoid that extra computation for each animal...
+    for(k in 1:M) {
+        # Standard SCR data augmentation, animal in pop, loc and dist to traps.
 		z[k] ~ dbern(psi)
-		sex[k] ~ dbern(psex)
-		X[k, 1] ~ dunif(xlim[1], xlim[2])
-		X[k, 2] ~ dunif(ylim[1], ylim[2])
-		d2[k,1:J] <- (X[k,1]-traps[1:J,1])^2 + (X[k,2]-traps[1:J,2])^2
-		pkj[k,1:J] <- exp(-d2[k,1:J]*tau2)
-		# Hazard rate for animal across all traps.
-		Hk[k] <- sum(pkj[k,1:J])*Time*lambda
-		pkz[k] <- exp(-Hk[k]*z[k])	# Only put z here for purposes of node dependence and speed.
+        X[k, 1] ~ dunif(xlim[1], xlim[2])
+        X[k, 2] ~ dunif(ylim[1], ylim[2])
+        d2[k,1:J] <- (X[k,1]-traps[1:J,1])^2 + (X[k,2]-traps[1:J,2])^2
+
+		#Now the rate for the Poisson process:
+		# Don't put lambda here for efficiency of updates.
+        pkj[k,1:J] <- exp(-d2[k,1:J]*tau2)
+        # Hazard rate for animal across all traps.
+        Hk[k] <- sum(pkj[k,1:J])*Time*lambda
+		# Only put z here for purposes of node dependence. Bounded 0-1 for ones trick.
+		pkz[k] <- exp(-Hk[k]*z[k])	
 		zones[k] ~ dbern(pkz[k])
-	}
-	for(k in (n_collar + 1):M) {
-		z[k] ~ dbern(psi)
-		sex[k] ~ dbern(psex)
-		X[k, 1] ~ dunif(xlim[1], xlim[2])
-		X[k, 2] ~ dunif(ylim[1], ylim[2])
-		d2[k,1:J] <- (X[k,1]-traps[1:J,1])^2 + (X[k,2]-traps[1:J,2])^2
-		pkj[k,1:J] <- exp(-d2[k,1:J]*tau2)
-		# Hazard rate for animal across all traps.
-		Hk[k] <- sum(pkj[k,1:J])*Time*lambda
-		pkz[k] <- exp(-Hk[k]*z[k])	# Only put z here for purposes of node dependence and speed.
-		zones[k] ~ dbern(pkz[k])
-	}
+   }
+
+	pID[1:M] <- z[1:M]*lambda	# Puts a prior on ID of z==1, adds lambda to the detections likelihood.
 
     # Trap history model.
     # and unobserved animal ID.
     for(i in 1:n_obs) {
         # trap probability given ID:
         # This one can certainly be just the ones trick for trap y[i].
-		pSex[i] <- (sex[ID[i]]+1) == obsSex[i] | obsSex[i] == 0
-		pCollar[i] <- (noCollar[ID[i]]) == obsCollar[i] | obsCollar[i] == 0
-		pobs[i] <- pkj[ID[i], omega[i]]*pSex[i]*pCollar[i]
-        ones[i] ~ dbern(pobs[i])
-		ID[i] ~ dID(lam = lambda)	# Dummy distribution to declare this as stochastic and mulitply by lambda.
+        omega[i] ~ dTrap(p = pkj[1:M, 1:J], ID = ID[i])
+		ID[i] ~ dID(pID = pID[1:M])	# Dummy distribution to declare this as stochastic and mulitply by lambda.
     }
 	
     # Predicted population size
@@ -163,8 +150,9 @@ SC_MPP_sex_collar <- nimbleCode({
 	D <- N/area
 })
 
-
-constants.mpp.cs <- list(
+# Run the same model from van Dam-Bates et al. Marked Poisson Process on fisher.
+#----------------------------------------------------------------------
+constants.mpp <- list(
     J = J,
     xlim = xlim,
     ylim = ylim,
@@ -172,41 +160,176 @@ constants.mpp.cs <- list(
     Time = StudyPeriod,
     M = M,
     n_obs = length(omega),
-	omega = omega,
-	area = diff(xlim)*diff(ylim)/100,
-	n_collar = 14,
-	obsCollar = obs$collar, # Unknown = 0, Collared = 1, Uncollared = 2
-	obsSex = obs$sex
-)
+	area = diff(xlim)*diff(ylim)/100
+	)
 
-data.mpp.cs <- list(
+data.mpp <- list(
     zones = rep(1, M),
-    ones = rep(1, length(omega)),
-	z =  c(rep(1, 14), rep(NA, M-14)),
+	z =  rep(NA, M),
 	ID = rep(NA, length(omega)),
-	sex = c(rep(0, 5), rep(1, 9), rep(NA, M-14)),	# Note 0 is male and 1 is female.
-	noCollar = c(rep(1, 14), rep(2, M-14))	# No collar = 1. We observed who is collared for animals.
+	omega = omega	
 )
 
-# Need to fully initialize because I haven't implemented a random generator distribution for dID()...
-# Bit of a pain to make sure we match sex and collar correctly.
-initsSexCollar <- function(){
+# Need to initialize this model as the stochastic node for ID is kind of wrong...
+inits.mpp <- function(){
 	lambda <- runif(1, 0.1, 1)
-	psex <- rbeta(1, 14, 9)	# Based on collared...
-	sigma <- runif(1, 1, 5)
+	sigma <- runif(1, 1, 2)
 	X <- cbind(runif(M, xlim[1], xlim[2]), 
 			  runif(M, ylim[1], ylim[2]))
 	d2 <- t(apply(X, 1, FUN = function(x){(x[1] - traps[,1])^2 + (x[2] - traps[,2])^2}))
 	hkj <- exp(-d2/(2*sigma^2))
-	sexCollar <- c(rep(0, 5), rep(1, 9))
-	sex <- c(rep(NA, 14), rbinom(M-14, size = 1, prob = psex))
+	psi <- rbeta(1,1,1)
+	z <- rbinom(M, size = 1, prob = psi)
+	ID <- do.call('c', lapply(omega, FUN = function(x) {sample(1:M, 1, prob = z*hkj[,x])}))
+	list(
+		lambda = lambda,
+		sigma = sigma,
+		psi = psi,
+		X = X,
+		z = z,
+		ID = ID
+    )
+}
+
+Rmodel <- nimbleModel(ModelMPP, constants.mpp, data.mpp, inits = inits.mpp())
+conf <- configureMCMC(Rmodel)
+conf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D', 'ID'))
+# Use a block update on locations. Saves time.
+# Turn off adaptive samping and fix the scale of the sampler to something reasonable.
+conf$removeSamplers('X')
+for(i in 1:M){
+	conf$addSampler(target = paste0('X[', i, ', 1:2]'), 
+		type = 'myJAM', silent = TRUE, control = list(scale = 1.5, xlim = xlim, ylim = ylim, temp = 0.2))
+}
+
+# Need to choose the fixed width for slice sampling.
+conf$removeSamplers('sigma')
+conf$addSampler(target = 'sigma', 
+		type = 'slice', silent = TRUE, control = list(adaptive = FALSE, scaleWidth = 0.5))		
+
+# Optimized z sampler
+conf$removeSamplers('z')
+conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
+# van Dam-Bates categorical sampler
+conf$removeSamplers('ID')
+# Chandler and Royle Alg. 1 sampler. Standard categorical sampler but built for speed.
+conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
+Rmcmc <- buildMCMC(conf)
+Cmodel <- compileNimble(Rmodel)
+Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
+
+# This code chunk is a way to do a quick run and check the model before you do a full run.
+# Cmcmc$run(15000, time = TRUE)
+# Cmcmc$getTimes()
+# mvSamples <- Cmcmc$mvSamples
+# samples <- as.matrix(mvSamples)
+# out <- mcmc(samples[-(1:5000),])
+# plot(out[,c('sigma', 'lambda', 'N', 'D')])
+# mean(diff(out[,c('sigma')]) > 0)
+# valueInCompiledNimbleFunction(Cmcmc$samplerFunctions[[403]], "width")
+
+samples2 <- runMCMC(Cmcmc, niter = 100000, nburnin = 40000, nchains = 3, 
+	thin = 1, inits = list(inits.mpp(), inits.mpp(), inits.mpp()))
+
+# Process the data in a sloppy way to see how many animals were observed.
+post21 <- samples2[[1]][,grep("ID", colnames(samples2[[1]]))]
+post22 <- samples2[[2]][,grep("ID", colnames(samples2[[2]]))]
+post23 <- samples2[[3]][,grep("ID", colnames(samples2[[3]]))]
+NObs1 <- apply(post21, 1, FUN = function(x){ length(unique(x))})
+NObs2 <- apply(post22, 1, FUN = function(x){ length(unique(x))})
+NObs3 <- apply(post23, 1, FUN = function(x){ length(unique(x))})
+
+# Bind that processed data to an MCMC object
+out2 <- mcmc.list(list(as.mcmc(cbind(samples2[[1]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "K" = NObs1)), 
+	as.mcmc(cbind(samples2[[2]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "K" =  NObs2)),
+	as.mcmc(cbind(samples2[[3]][,c('sigma', 'lambda', 'psi', 'N', 'D')], "K" = NObs3))))
+# MCMCglmm::posterior.mode(out2)
+# summary(out2)
+# effectiveSize(out2)
+
+####################################
+# Model 3: Just sex as a covariate
+####################################
+Model3 <- nimbleCode({
+    lambda ~ dunif(0, 20) # Detection rate at distance 0
+    psi ~ dbeta(1, 1)      # prior on data augmentation bernoulli vec.
+    sigma ~ dunif(0, 50)	# Now the prior is directly on sigma to be consistent with literature.
+    tau2<- 1/(2*sigma^2)	# Just avoid that extra computation for each animal...
+	psex ~ dbeta(1,1)
+	# For the collared individuals, we know the sex too! It's actually observed.
+	# So we have observed sex 1:14 and an additional covariate of collar.
+	# As a result, we also have z = 1 observed for 1:14
+	for(k in 1:M) {
+		z[k] ~ dbern(psi)
+		sex[k] ~ dbern(psex)
+		X[k, 1] ~ dunif(xlim[1], xlim[2])
+		X[k, 2] ~ dunif(ylim[1], ylim[2])
+		d2[k,1:J] <- (X[k,1]-traps[1:J,1])^2 + (X[k,2]-traps[1:J,2])^2
+		pkj[k,1:J] <- exp(-d2[k,1:J]*tau2)
+		# Hazard rate for animal across all traps.
+		Hk[k] <- sum(pkj[k,1:J])*Time*lambda
+		pkz[k] <- exp(-Hk[k]*z[k])	# Only put z here for purposes of node dependence and speed.
+		zones[k] ~ dbern(pkz[k])
+	}
+
+	pID[1:M] <- z[1:M]*lambda
+
+    # Trap history model.
+    # and unobserved animal ID.
+    for(i in 1:n_obs) {
+		# Hard match/no match info.
+		pSex[i] <- (sex[ID[i]]+1) == obsSex[i] | obsSex[i] == 0
+		keep[i] ~ dbern(pSex[i])
+		
+		# Trap Prob
+        omega[i] ~ dTrap(p = pkj[1:M, 1:J], ID = ID[i])
+
+		# ID prior based on z, with lambda mixed in.
+		ID[i] ~ dID(pID = pID[1:M])
+    }
+	
+    # Predicted population size
+    N <- sum(z[1:M])
+	D <- N/area
+})
+
+constants3 <- list(
+    J = J,
+    xlim = xlim,
+    ylim = ylim,
+    traps = traps, 
+    Time = StudyPeriod,
+    M = M,
+    n_obs = length(omega),
+	area = diff(xlim)*diff(ylim)/100,
+	obsSex = obs$sex
+)
+
+data3 <- list(
+    zones = rep(1, M),
+    omega = omega,
+	keep = rep(1, length(omega)),
+	z =  rep(NA,M),
+	ID = rep(NA, length(omega)),
+	sex = rep(NA, M)	# Note 0 is male and 1 is female.
+)
+
+# Need to fully initialize because I haven't implemented a random generator distribution for dID()...
+# Bit of a pain to make sure we match sex and collar correctly.
+init3 <- function(){
+	lambda <- runif(1, 0.1, 1)
+	psex <- rbeta(1, Nc, Ncf)	# Based on collared...
+	sigma <- runif(1, 2, 4)
+	X <- cbind(runif(M, xlim[1], xlim[2]), 
+			  runif(M, ylim[1], ylim[2]))
+	d2 <- t(apply(X, 1, FUN = function(x){(x[1] - traps[,1])^2 + (x[2] - traps[,2])^2}))
+	hkj <- exp(-d2/(2*sigma^2))
+	sex <- rbinom(M, size = 1, prob = psex)
 	ID <- numeric(length(omega))
-	ID[obs$collar == 1] <- do.call('c',lapply(which(obs$collar == 1), FUN = function(x){sample(1:14, 1, prob = hkj[1:14,omega[x]]*(sexCollar+1 == obs$sex[x] |  obs$sex[x] == 0))}))
-	ID[obs$collar == 2] <- do.call('c',lapply(which(obs$collar == 2), FUN = function(x){sample(15:M, 1, prob = hkj[15:M,omega[x]]*(sex[15:M]+1 == obs$sex[x] |  obs$sex[x] == 0))}))
-	ID[obs$collar == 0] <- do.call('c',lapply(which(obs$collar == 0), FUN = function(x){sample(1:M, 1,  prob = hkj[1:M,omega[x]]*(c(sexCollar, sex[15:M])+1 == obs$sex[x] |  obs$sex[x] == 0))}))	
-	z <- c(rep(NA, 14), rep(0, M-14))
-	z[ID[ID > 14]] <- 1
-	psi <- rbeta(1, sum(z,na.rm = TRUE) + 14, M - sum(1-z, na.rm = TRUE))	# NA inits...
+	ID <- do.call('c',lapply(1:length(omega), FUN = function(x){sample(1:M, 1, prob = hkj[1:M,omega[x]]*(sex+1 == obs$sex[x] |  obs$sex[x] == 0))}))
+	z <- rep(0, M)
+	z[ID] <- 1
+	psi <- rbeta(1, sum(z, na.rm = TRUE), M - sum(1-z, na.rm = TRUE))	# NA inits...
 	list(
 		lambda = lambda,
 		sigma = sigma,
@@ -219,92 +342,93 @@ initsSexCollar <- function(){
     )
 }
 
-MPPModel <- nimbleModel(SC_MPP_sex_collar, constants.mpp.cs, data.mpp.cs, inits = initsSexCollar())
-MPPconf <- configureMCMC(MPPModel)
-MPPconf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D', 'ID', 'psex', 'sex'))
+###################################
+# Chandler and Royle Sampler:
+###################################
+Rmodel <- nimbleModel(Model3, constants3, data3, inits = init3())
+conf <- configureMCMC(Rmodel)
+conf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D', 'ID', 'psex', 'sex', 'z'))
 
-MPPconf$removeSamplers('sigma')
-MPPconf$addSampler(target = 'sigma', scalarComponents = TRUE,
-	type = 'RW', silent = TRUE, control = list(adaptive = FALSE, scale = 0.25))
-
-# Use a block update on locations. Saves time.
-MPPconf$removeSamplers('X')
-for(i in 1:M) MPPconf$addSampler(target = paste0('X[', i, ', 1:2]'), 
-	type = 'RW_block', silent = TRUE, control = list(adaptive = FALSE, scale = 2))
+conf$removeSamplers('X')
+for(i in 1:M){
+	conf$addSampler(target = paste0('X[', i, ', 1:2]'), 
+		type = 'myJAM', silent = TRUE, control = list(scale = 1.5, xlim = xlim, ylim = ylim, temp = 0.2))
+	# conf$addSampler(target = paste0('X[', i, ', 1:2]'), 
+		# type = 'RW_block', silent = TRUE, control = list(scale = 2, adaptive = FALSE))		
+}
+conf$removeSamplers('sigma')
+conf$addSampler(target = 'sigma', 
+		type = 'slice', silent = TRUE, control = list(adaptive = FALSE, scaleWidth = 1))		
 # Optimized z sampler
-MPPconf$removeSamplers('z')
-MPPconf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
+conf$removeSamplers('z')
+conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
 
-MPPconf$removeSamplers('ID')
-MPPconf$addSampler('ID', type = 'myIDZ', scalarComponents = TRUE, control = list(M = M))
-MPPRmcmc <- buildMCMC(MPPconf)
-MPPCmodel <- compileNimble(MPPModel)
-MPPCmcmc <- compileNimble(MPPRmcmc, project = MPPModel)
+conf$removeSamplers('ID')
+conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
+Rmcmc <- buildMCMC(conf)
+Cmodel <- compileNimble(Rmodel)
+Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-# Do a test run on the MCMC object.
-# MPPCmcmc$run(1000)
-# mvSamples <- MPPCmcmc$mvSamples
+# Cmcmc$run(10000, time = TRUE)
+# Cmcmc$getTimes()
+# mvSamples <- Cmcmc$mvSamples
 # samples <- as.matrix(mvSamples)
+# valueInCompiledNimbleFunction(Cmcmc$samplerFunctions[[3]], "scale")
 # out <- mcmc(samples[-(1:5000),])
-# plot(out[,c('N', 'D', 'psex')])	# proportion of males/females matches SCR data. 0.6
-# dev.new()
-# plot(out[,c('sigma', 'lambda')])
+# plot(out[,c('sigma', 'lambda', 'N', 'D', 'psex')])
+# post <- samples[-(1:5000),grep("ID", colnames(samples))]
+# K <- apply(post, 1, FUN = function(x){length(unique(x))})
+# plot(samples[-(1:5000),"N"], K)
 
 # The full run...
-samples.sexcol <- runMCMC(MPPCmcmc, 60000, nburnin = 20000, nchains = 3, 
-	thin = 1, inits = list(initsSexCollar(), initsSexCollar(), initsSexCollar()))
+samples3 <- runMCMC(Cmcmc, niter = 40000, nburnin = 20000, nchains = 3, 
+	thin = 1, inits = list(init3(), init3(), init3()))
 
 # Compute the number of actually observed fisher to compare with SCR model in paper.
-post.id.1 <- samples.sexcol[[1]][,grep("ID", colnames(samples.sexcol[[1]]))]
-post.id.2 <- samples.sexcol[[2]][,grep("ID", colnames(samples.sexcol[[2]]))]
-post.id.3 <- samples.sexcol[[3]][,grep("ID", colnames(samples.sexcol[[3]]))]
-NActive1 <- apply(post.id.1, 1, FUN = function(x){ length(unique(x))})
-NActive2 <- apply(post.id.2, 1, FUN = function(x){ length(unique(x))})
-NActive3 <- apply(post.id.3, 1, FUN = function(x){ length(unique(x))})
+post1 <- samples3[[1]][,grep("ID", colnames(samples3[[1]]))]
+post2 <- samples3[[2]][,grep("ID", colnames(samples3[[2]]))]
+post3 <- samples3[[3]][,grep("ID", colnames(samples3[[3]]))]
+NObs1 <- apply(post1, 1, FUN = function(x){ length(unique(x))})
+NObs2 <- apply(post2, 1, FUN = function(x){ length(unique(x))})
+NObs3 <- apply(post3, 1, FUN = function(x){ length(unique(x))})
 
 # Do it by sex as well...
-cols <- grepl("sex", colnames(samples.sexcol[[1]])) & !grepl("psex", colnames(samples.sexcol[[1]]))
-post.sex1 <- samples.sexcol[[1]][,cols]
-post.sex2 <- samples.sexcol[[2]][,cols]
-post.sex3 <- samples.sexcol[[3]][,cols]
-NActiveFemales1 <- do.call('c', lapply(1:nrow(post.id.1),  FUN = function(x){ sum(post.sex1[x,unique(post.id.1[x,])])}))
-NActiveFemales2 <- do.call('c', lapply(1:nrow(post.id.1),  FUN = function(x){ sum(post.sex2[x,unique(post.id.2[x,])])}))
-NActiveFemales3 <- do.call('c', lapply(1:nrow(post.id.1),  FUN = function(x){ sum(post.sex3[x,unique(post.id.3[x,])])}))
-
+cols <- grepl("sex", colnames(samples3[[1]])) & !grepl("psex", colnames(samples3[[1]]))
+post.sex1 <- samples3[[1]][,cols]
+post.sex2 <- samples3[[2]][,cols]
+post.sex3 <- samples3[[3]][,cols]
+NObsF1 <- do.call('c', lapply(1:nrow(post1),  FUN = function(x){ sum(post.sex1[x,unique(post1[x,])])}))
+NObsF2 <- do.call('c', lapply(1:nrow(post2),  FUN = function(x){ sum(post.sex2[x,unique(post2[x,])])}))
+NObsF3 <- do.call('c', lapply(1:nrow(post3),  FUN = function(x){ sum(post.sex3[x,unique(post3[x,])])}))
 
 # Complicated way of adding those observed animals to the MCMC object... Apologies.
-out.sexcol <- mcmc.list(list(as.mcmc(cbind(samples.sexcol[[1]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "NActive" = NActive1)), 
-	as.mcmc(cbind(samples.sexcol[[2]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "NActive" =  NActive2)),
-	as.mcmc(cbind(samples.sexcol[[3]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "NActive" = NActive3))))
+out3 <- mcmc.list(list(as.mcmc(cbind(samples3[[1]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "K" = NObs1, "KF" = NObsF1, "KM" = NObs1 - NObsF1)), 
+	as.mcmc(cbind(samples3[[2]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "K" =  NObs2, "KF" = NObsF2, "KM" = NObs2 - NObsF2)),
+	as.mcmc(cbind(samples3[[3]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "K" = NObs3, "KF" = NObsF3, "KM" = NObs3 - NObsF3))))
+plot(out3[, c("sigma", "D", "K")])
+# MCMCglmm::posterior.mode(out3)
 
-save(out.sexcol, file = "../output/FisherSexCollar.Rda")
-
-plot(out.sexcol[,1:2])
-dev.new()
-plot(out.sexcol[,4:5])
-plot(out.sexcol[,"NActive"], main = "Number of active clusters")
-
-par(mfrow = c(3,1))
-hist(c(NActive1, NActive2, NActive3), xlab = "# Detected Fisher", main = "")
-abline(v = 24, col = 'red')
-hist(c(NActiveFemales1, NActiveFemales2, NActiveFemales3), xlab = "# Detected Females", main = "")
-abline(v = 15, col = 'red')
-hist(c(NActive1 - NActiveFemales1, NActive2 -  NActiveFemales2, NActive3 -  NActiveFemales3), xlab = "# Detected Males", main = "")
-abline(v = 9, col = 'red')
 
 ####################################
-# SPIM version but constrain to max 5 males, 9 females.
-# collared animals.
+# Model 4: Sex and collar as covariates
 ####################################
-# van Dam-Bates Spatial Count Model using the Marked Poisson process formulation.
-SC_Spim <- nimbleCode({
+# This works in theory but the problem is that 
+# the marking was happening at the same time as the study
+# so I need to adjust when animals were marked with the
+# time of the photographs to correct it.
+####################################
+Model4 <- nimbleCode({
     lambda ~ dunif(0, 20) # Detection rate at distance 0
     psi ~ dbeta(1, 1)      # prior on data augmentation bernoulli vec.
     sigma ~ dunif(0, 50)	# Now the prior is directly on sigma to be consistent with literature.
     tau2<- 1/(2*sigma^2)	# Just avoid that extra computation for each animal...
-	# For the collared individuals, we know the sex too! It's actually observed :)
+	psex ~ dbeta(1,1)
+	# For the collared individuals, we know the sex too! It's actually observed.
+	# So we have observed sex 1:14 and an additional covariate of collar.
+	# As a result, we also have z = 1 observed for 1:14
 	for(k in 1:M) {
 		z[k] ~ dbern(psi)
+		sex[k] ~ dbern(psex)
 		X[k, 1] ~ dunif(xlim[1], xlim[2])
 		X[k, 2] ~ dunif(ylim[1], ylim[2])
 		d2[k,1:J] <- (X[k,1]-traps[1:J,1])^2 + (X[k,2]-traps[1:J,2])^2
@@ -315,14 +439,22 @@ SC_Spim <- nimbleCode({
 		zones[k] ~ dbern(pkz[k])
 	}
 
+	pID[1:M] <- z[1:M]*lambda
+
     # Trap history model.
     # and unobserved animal ID.
     for(i in 1:n_obs) {
-        # trap probability given ID:
-        # This one can certainly be just the ones trick for trap y[i].
-		pobs[i] <- pkj[ID[i], omega[i]]
-        ones[i] ~ dbern(pobs[i])
-		ID[i] ~ dID(lam = lambda)	# Dummy distribution to declare this as stochastic and mulitply by lambda.
+		# Hard match/no match info.
+		pSex[i] <- (sex[ID[i]]+1) == obsSex[i] | obsSex[i] == 0
+		pCollar[i] <- (noCollar[ID[i]]) == obsCollar[i] | obsCollar[i] == 0
+		pMatch[i] <- pCollar[i]*pSex[i]
+		keep[i] ~ dbern(pMatch[i])
+		
+		# Trap Prob
+        omega[i] ~ dTrap(p = pkj[1:M, 1:J], ID = ID[i])
+
+		# ID prior based on z, with lambda mixed in.
+		ID[i] ~ dID(pID = pID[1:M])
     }
 	
     # Predicted population size
@@ -330,8 +462,11 @@ SC_Spim <- nimbleCode({
 	D <- N/area
 })
 
+Nc <- 14
+Ncm <- 5
+Ncf <- 9
 
-constants.spim <- list(
+constants4 <- list(
     J = J,
     xlim = xlim,
     ylim = ylim,
@@ -339,103 +474,112 @@ constants.spim <- list(
     Time = StudyPeriod,
     M = M,
     n_obs = length(omega),
-	omega = omega,
-	area = diff(xlim)*diff(ylim)/100
+	area = diff(xlim)*diff(ylim)/100,
+	n_collar = Nc,
+	obsCollar = obs$collar, # Unknown = 0, Collared = 1, Uncollared = 2
+	obsSex = obs$sex
 )
 
-data.spim <- list(
+data4 <- list(
     zones = rep(1, M),
-    ones = rep(1, length(omega)),
-	z =  c(rep(1, 14), rep(NA, M-14)),
-	ID = rep(NA, length(omega))
+    omega = omega,
+	keep = rep(1, length(omega)),
+	z =  c(rep(1, Nc), rep(NA, M-Nc)),
+	ID = rep(NA, length(omega)),
+	sex = c(rep(0, Ncm), rep(1, Ncf), rep(NA, M-Nc)),	# Note 0 is male and 1 is female.
+	noCollar = c(rep(1, Nc), rep(2, M-Nc))	# No collar = 1. We observed who is collared for animals.
 )
 
 # Need to fully initialize because I haven't implemented a random generator distribution for dID()...
 # Bit of a pain to make sure we match sex and collar correctly.
-initsSexCollar <- function(){
+init4 <- function(){
 	lambda <- runif(1, 0.1, 1)
-	psex <- rbeta(1, 14, 9)	# Based on collared...
-	sigma <- runif(1, 1, 5)
+	psex <- rbeta(1, Nc, Ncf)	# Based on collared...
+	sigma <- runif(1, 2, 4)
 	X <- cbind(runif(M, xlim[1], xlim[2]), 
 			  runif(M, ylim[1], ylim[2]))
 	d2 <- t(apply(X, 1, FUN = function(x){(x[1] - traps[,1])^2 + (x[2] - traps[,2])^2}))
 	hkj <- exp(-d2/(2*sigma^2))
-	sexCollar <- c(rep(0, 5), rep(1, 9))
-	sex <- c(rep(NA, 14), rbinom(M-14, size = 1, prob = psex))
+	sexCollar <- c(rep(0, Ncm), rep(1, Ncf))
+	sex <- c(rep(NA, Nc), rbinom(M-Nc, size = 1, prob = psex))
 	ID <- numeric(length(omega))
-	ID[obs$collar == 1] <- do.call('c',lapply(which(obs$collar == 1), FUN = function(x){sample(1:14, 1, prob = hkj[1:14,omega[x]]*(sexCollar+1 == obs$sex[x] |  obs$sex[x] == 0))}))
-	ID[obs$collar == 2] <- do.call('c',lapply(which(obs$collar == 2), FUN = function(x){sample(15:M, 1, prob = hkj[15:M,omega[x]]*(sex[15:M]+1 == obs$sex[x] |  obs$sex[x] == 0))}))
-	ID[obs$collar == 0] <- do.call('c',lapply(which(obs$collar == 0), FUN = function(x){sample(1:M, 1,  prob = hkj[1:M,omega[x]]*(c(sexCollar, sex[15:M])+1 == obs$sex[x] |  obs$sex[x] == 0))}))	
-	z <- c(rep(NA, 14), rep(0, M-14))
-	z[ID[ID > 14]] <- 1
-	psi <- rbeta(1, sum(z,na.rm = TRUE) + 14, M - sum(1-z, na.rm = TRUE))	# NA inits...
+	ID[obs$collar == 1] <- do.call('c',lapply(which(obs$collar == 1), FUN = function(x){sample(1:Nc, 1, prob = hkj[1:Nc,omega[x]]*(sexCollar+1 == obs$sex[x] |  obs$sex[x] == 0))}))
+	ID[obs$collar == 2] <- do.call('c',lapply(which(obs$collar == 2), FUN = function(x){sample((Nc+1):M, 1, prob = hkj[(Nc+1):M,omega[x]]*(sex[(Nc+1):M]+1 == obs$sex[x] |  obs$sex[x] == 0))}))
+	ID[obs$collar == 0] <- do.call('c',lapply(which(obs$collar == 0), FUN = function(x){sample(1:M, 1,  prob = hkj[1:M,omega[x]]*(c(sexCollar, sex[(Nc+1):M])+1 == obs$sex[x] |  obs$sex[x] == 0))}))	
+	z <- rep(0, M)
+	z[ID] <- 1
+	z[1:Nc] <- NA
+	psi <- rbeta(1, sum(z, na.rm = TRUE) + Nc, M - sum(1-z, na.rm = TRUE))	# NA inits...
 	list(
 		lambda = lambda,
 		sigma = sigma,
 		psi = psi,
 		X = X,
 		z = z,
-		ID = ID
+		ID = ID,
+		sex = sex,
+		psex = psex
     )
 }
 
-MPPModel <- nimbleModel(SC_Spim, constants.spim, data.spim, inits = initsSexCollar())
-MPPconf <- configureMCMC(MPPModel)
-MPPconf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D', 'ID'))
+###################################
+# Chandler and Royle Sampler:
+###################################
+Rmodel <- nimbleModel(Model4, constants4, data4, inits = init4())
+conf <- configureMCMC(Rmodel)
+conf$setMonitors(c('sigma', 'lambda', 'psi', 'N', 'D', 'ID', 'psex', 'sex', 'z'))
 
-MPPconf$removeSamplers('sigma')
-MPPconf$addSampler(target = 'sigma', scalarComponents = TRUE,
-	type = 'RW', silent = TRUE, control = list(adaptive = FALSE, scale = 0.25))
-
-# Use a block update on locations. Saves time.
-MPPconf$removeSamplers('X')
-for(i in 1:M) MPPconf$addSampler(target = paste0('X[', i, ', 1:2]'), 
-	type = 'RW_block', silent = TRUE, control = list(adaptive = FALSE, scale = 2))
-# Optimized z sampler
-MPPconf$removeSamplers('z')
-MPPconf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
-
-MPPconf$removeSamplers('ID')
-# Only 1 must link:
-indx <- which(rowSums(mustlink) > 1)
-# This is a stupid thing to do...
-animalLinks <- cbind(rep(1, M),  			   # No info
-	c(rep(1, 5), rep(0, M-5)),   			   # Male collared
-	c(rep(0, 5), rep(1, 14-5), rep(0, M-14)),  # Female collared
-	c(rep(1, 14),rep(0, M-14)),                # No sex collared
-	c(rep(0, 14), rep(1, M-14))) # UnCollared
-	
-
-for(i in 1:length(omega)){
-	if(obs[i, 'collar'] == 1 & obs[i, 'sex'] == 1) linki = animalLinks[,2]
-	if(obs[i, 'collar'] == 1 & obs[i, 'sex'] == 2) linki = animalLinks[,3]
-	if(obs[i, 'collar'] == 2) linki = animalLinks[,5]
-	if(obs[i, 'collar'] == 0 & obs[i, 'sex'] == 0) linki = animalLinks[,1] + animalLinks[,5]
-	if(obs[i, 'collar'] == 0 & obs[i, 'sex'] == 1) linki = animalLinks[,2] + animalLinks[,5]
-	if(obs[i, 'collar'] == 0 & obs[i, 'sex'] == 2) linki = animalLinks[,3] + animalLinks[,5]
-	MPPconf$addSampler(target = paste0('ID[', i, ']'), type = 'mySPIM', control = list(M = M, cannotlink = cannotlink, AnimalLink = linki))
+conf$removeSamplers('X')
+for(i in 1:M){
+	conf$addSampler(target = paste0('X[', i, ', 1:2]'), 
+		type = 'myJAM', silent = TRUE, control = list(scale = 1.5, xlim = xlim, ylim = ylim, temp = 0.2))
 }
-MPPconf$removeSamplers(paste0('ID[', indx, ']'))
-MPPconf$addSampler(target = paste0('ID[', indx, ']'), type = 'mySPIM', scalarComponents = FALSE, control = list(M = M, cannotlink = cannotlink, AnimalLink = animalLinks[,2]))
 
-MPPRmcmc <- buildMCMC(MPPconf)
-MPPCmodel <- compileNimble(MPPModel)
-MPPCmcmc <- compileNimble(MPPRmcmc, project = MPPModel)
+# Probably worth playing around with this width of the slice sampler still.
+conf$removeSamplers('sigma')
+conf$addSampler(target = 'sigma', 
+		type = 'slice', silent = TRUE, control = list(adaptive = FALSE, scaleWidth = 1))		
 
-# Do a test run on the MCMC object.
-MPPCmcmc$run(10000)
-mvSamples <- MPPCmcmc$mvSamples
-samples <- as.matrix(mvSamples)
-out <- mcmc(samples[-(1:5000),])
-plot(out[,c('N', 'D')])	# proportion of males/females matches SCR data. 0.6
-dev.new()
-plot(out[,c('sigma', 'lambda')])
+# Optimized z sampler
+conf$removeSamplers('z')
+conf$addSampler('z', type = 'myBinary', scalarComponents = TRUE)
 
-post.id <- samples[-(1:5000),grep("ID", colnames(samples))]
-sum(post.id[,2] == post.id[,106])
-sqrt(sum((traps[35,] - traps[34,])^2))
-cannotlink[34,106]
-cannotlink[106,34]
+conf$removeSamplers('ID')
+conf$addSampler('ID', type = 'myCategorical', scalarComponents = TRUE, control = list(M = M))
+Rmcmc <- buildMCMC(conf)
+Cmodel <- compileNimble(Rmodel)
+Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-NActive <- apply(post.id, 1, FUN = function(x){ length(unique(x))})
-hist(NActive)
+# Cmcmc$run(20000, time = TRUE)
+# Cmcmc$getTimes()
+# mvSamples <- Cmcmc$mvSamples
+# samples <- as.matrix(mvSamples)
+# out <- mcmc(samples[-(1:5000),])
+# plot(out[,c('sigma', 'lambda', 'N', 'D', 'psex')])
+# plot(out[,c('sigma', 'D')])
+
+# The full run...
+samples4 <- runMCMC(Cmcmc, niter = 100000, nburnin = 40000, nchains = 3, 
+	thin = 1, inits = list(init4(), init4(), init4()))
+
+# Compute the number of actually observed fisher to compare with SCR model in paper.
+post1 <- samples4[[1]][,grep("ID", colnames(samples4[[1]]))]
+post2 <- samples4[[2]][,grep("ID", colnames(samples4[[2]]))]
+post3 <- samples4[[3]][,grep("ID", colnames(samples4[[3]]))]
+NObs1 <- apply(post1, 1, FUN = function(x){ length(unique(x))})
+NObs2 <- apply(post2, 1, FUN = function(x){ length(unique(x))})
+NObs3 <- apply(post3, 1, FUN = function(x){ length(unique(x))})
+
+# Do it by sex as well...
+cols <- grepl("sex", colnames(samples4[[1]])) & !grepl("psex", colnames(samples4[[1]]))
+post.sex1 <- samples4[[1]][,cols]
+post.sex2 <- samples4[[2]][,cols]
+post.sex3 <- samples4[[3]][,cols]
+NObsF1 <- do.call('c', lapply(1:nrow(post1),  FUN = function(x){ sum(post.sex1[x,unique(post1[x,])])}))
+NObsF2 <- do.call('c', lapply(1:nrow(post2),  FUN = function(x){ sum(post.sex2[x,unique(post2[x,])])}))
+NObsF3 <- do.call('c', lapply(1:nrow(post3),  FUN = function(x){ sum(post.sex3[x,unique(post3[x,])])}))
+
+# Complicated way of adding those observed animals to the MCMC object... Apologies.
+out4 <- mcmc.list(list(as.mcmc(cbind(samples4[[1]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "K" = NObs1, "KF" = NObsF1, "KM" = NObs1 - NObsF1)), 
+	as.mcmc(cbind(samples4[[2]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "K" =  NObs2, "KF" = NObsF2, "KM" = NObs2 - NObsF2)),
+	as.mcmc(cbind(samples4[[3]][,c('sigma', 'lambda', 'psi', 'N', 'D', 'psex')], "K" = NObs3, "KF" = NObsF3, "KM" = NObs3 - NObsF3))))

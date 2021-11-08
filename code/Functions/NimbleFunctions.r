@@ -207,10 +207,16 @@ sampler_myJAM <- nimbleFunction(
         ylim <- extractControlElement(control, 'ylim', c(0,1))		
 		scale <- extractControlElement(control, 'scale', 1)		
 		temp <- extractControlElement(control, 'temp', 0.5)		
+		nv <- extractControlElement(control, 'occ', 1)
 
         calcNodes <- model$getDependencies(target)
-        nodeIndex <- as.numeric(gsub('^X\\[([[:digit:]]+), .*$', '\\1', target))
-        zNode <- paste0('z[', nodeIndex, ']')
+        nodeIndex <- as.numeric(gsub(".*?([0-9]+).*", '\\1', target))
+		if(nv == 1){ 
+			zNode <- paste0('z[', nodeIndex, ']')
+		}else{
+			v <- as.numeric(sub(".*,\\D*(\\d+).*", "\\1", target))
+			zNode <- paste0('z[', nodeIndex,',', v, ']')
+		}		
     },
     run = function() {
 		p <- runif(1,0,1)

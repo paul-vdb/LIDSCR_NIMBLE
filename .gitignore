@@ -384,3 +384,4 @@ output/fisherModel3Adaptive.Rda
 output/fisherModel3.Rda
 output/fisherModel2.Rda
 output/fisherModel1.Rda
+*.Rda
