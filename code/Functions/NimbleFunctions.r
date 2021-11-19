@@ -379,8 +379,6 @@ sampler_mySPIM <- nimbleFunction(
         probs <- numeric(M)
         logProbs <- numeric(M)		
 		cannotlink <- extractControlElement(control, 'cannotlink', 'identity')	# n x n matrix where a 1 indicates i cannot link to detection j.
-		AnimalLink <- extractControlElement(control, 'AnimalLink', -1)	# A zero represents an impossible animal match.
-        if(AnimalLink[1] == -1) AnimalLink <- numeric(length = M, value = 1)
 		nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', targetNodesAsScalar[1]))
 		n_grp <- length(targetNodesAsScalar)
     },
@@ -388,27 +386,23 @@ sampler_mySPIM <- nimbleFunction(
         currentValue <- model[["ID"]][nodeIndex]
         logProbs[currentValue] <<- model$getLogProb(calcNodes)
         for(k in 1:M) {
-			if(AnimalLink[k] == 0) {	# If we can't link to a particular animal. 0 means cannot link to animal.
+			model[[target]] <<- k
+			logProbPrior <- model$calculate(target)
+			if(logProbPrior == -Inf) {
 				logProbs[k] <<- -Inf
-			}else {
-				if(k != currentValue) {
-					if(model[['z']][k] == 0) {
-						logProbs[k] <<- -Inf
-					} else {
-						# Add in the pairwise constraint. 1 means cannot link.
-						no_link <- sum(cannotlink[model[['ID']] == k, nodeIndex])	# This is the check to see if there are cannot links.
-						if(no_link > 0)
-						{
-							logProbs[k] <<- -Inf
-						}else {					
-							values(model, targetNodesAsScalar) <<- rep(k, n_grp)		
-							logProbs[k] <<- model$calculate(calcNodes)
-							if(is.nan(logProbs[k])) logProbs[k] <<- -Inf
-						}	
-					}
-				}
+			} else {
+				# Add in the pairwise constraint. 1 means cannot link.
+				no_link <- sum(cannotlink[model[['ID']] == k, nodeIndex])	# This is the check to see if there are cannot links.
+				if(no_link > 0)
+				{
+					logProbs[k] <<- -Inf
+				}else {					
+					values(model, targetNodesAsScalar) <<- rep(k, n_grp)
+					logProbs[k] <<- model$calculate(calcNodes)
+					if(is.nan(logProbs[k])) logProbs[k] <<- -Inf
+				}	
 			}
-        }
+		}
         logProbs <<- logProbs - max(logProbs)
         probs <<- exp(logProbs)
         newValue <- rcat(1, probs)		
