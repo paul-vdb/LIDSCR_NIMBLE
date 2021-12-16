@@ -104,28 +104,62 @@ rbinom_vector_ascr <- nimbleFunction(
   })
 
 
-dMarg <- nimbleFunction(
-  run = function( x = double(0),
-				  toa = double(1),
-				  y = double(1),
-				  J = double(0),
-                  size = double(1),
-                  pkj = double(2),
-				  sd = double(0),
-				  expTime = double(2),
-				  M = double(0),
+RdensityFunction <- function(x = double(1), prob = double(2), thresh = double(0, default = 0), log = integer(0, default = 0)) {
+    require(poisbinom)
+	val <- 0
+	for(j in 1:ncol(prob))
+	{
+		if(x[j] == 0) 
+		{	
+			val <- val + log(sum(1-prob[,j]))
+		}else{
+			pp <- prob[prob[, j] > thresh, j]
+			if(sum(pp > 0) > x[j]) 
+			{
+				if(x[j] > 0) val <- val + dpoisbinom(x[j], pp = pp, log = 1)
+			}else{
+				val <- -Inf
+				if(log) return(val) else return(exp(val))		
+			}
+		}
+	}
+	returnType = double(0)
+    if(log) return(val) else return(exp(val))
+}
+
+dPoisBin <- nimbleRcall(
+    prototype = function(x = double(1), prob = double(2), thresh = double(0), log = integer(0)) {},
+    returnType = double(0),
+    Rfun = 'RdensityFunction'
+)
+
+dPoisSC <- nimbleFunction(
+  run = function( x = double(1),
+                  lambda = double(2),
+				  J = integer(0),
                   log = integer(0, default = 0)
                   ) {
     returnType(double(0))
-		likelihood <- 0
-		for(k in 1:M) {
-			lpcapt <- dbinom_vector(x = y, size = size, prob = pkj[k,1:J], log = 1)
-			lptoa <- dnorm_vector_marg(x = toa, mean = expTime[k,1:J], sd = sd, y = y, log = 1)
-			likelihood <- likelihood + exp(lptoa + lpcapt)
-		}
-    if(log) return(log(likelihood)) else return(likelihood)
+	val <- 0
+	for(j in 1:J)
+	{
+		Lamj <- sum(lambda[,j])
+		val <- val + x[j]*log(Lamj) - Lamj
+    }
+    if(log) return(val) else return(exp(val))
   })
 
+rPoisSC <- nimbleFunction(
+  run = function( n = integer(0, default = 1),
+                  lambda = double(2), J = integer(0)) {
+    returnType(double(1))
+	nj <- numeric(J)
+	for(j in 1:J)
+	{
+		nj[j] <- rpois(1, sum(lambda[,j]))
+	}
+    return(nj)
+  })
 
 registerDistributions(
     list(dX = list(BUGSdist = 'dX()',
@@ -137,9 +171,17 @@ registerDistributions(
 		 dbinom_vector_ascr = list(BUGSdist = 'dbinom_vector_ascr()',
 				   types =c('value = double(1)')),
 		 dnorm_vector_marg = list(BUGSdist = 'dnorm_vector_marg(mean, sd, y)',
-				   types = c('value = double(1)', 'mean = double(1)', 'sd = double(0)', 'y = double(1)'))
-				   ) )
-
+				   types = c('value = double(1)', 'mean = double(1)', 'sd = double(0)', 'y = double(1)')),
+      	 dPoisBin = list(
+				   BUGSdist = 'dPoisBin(prob, thresh)', Rdist = 'dPoisBin(prob, thresh)',
+				   types = c('value = double(1)', 'prob = double(2)', 'thresh = double(0)')
+				   ),
+      	 dPoisSC = list(
+				   BUGSdist = 'dPoisSC(lambda,J)', Rdist = 'dPoisSC(lambda,J)',
+				   types = c('value = double(1)', 'lambda = double(2)', 'J = integer(0)')
+				   )		
+		   )
+	)
 
 sampler_myX <- nimbleFunction(
     name = 'sampler_myX',
@@ -421,8 +463,65 @@ sampler_mySPIM <- nimbleFunction(
     methods = list( reset = function() { } )
 )
 
+sampler_myCategoricalBernoulli <- nimbleFunction(
+    name = 'sampler_myCategoricalBernoulli',
+    contains = sampler_BASE,
+    setup = function(model, mvSaved, target, control) {
+        calcNodes <- model$getDependencies(target)
+        calcNodesNoSelf <- model$getDependencies(target, self = FALSE)
+        isStochCalcNodesNoSelf <- model$isStoch(calcNodesNoSelf)
+        calcNodesNoSelfDeterm <- calcNodesNoSelf[!isStochCalcNodesNoSelf]
+        calcNodesNoSelfStoch <- calcNodesNoSelf[isStochCalcNodesNoSelf]
 
+		nodeIndex <- as.numeric(gsub('[^[:digit:]]', '', target))
 
+        M <- control$M
+		omega <- control$omega
+        probs <- numeric(M)
+        logProbs <- numeric(M)
+    },
+    run = function() {
+		ID_j <- model[['ID']][omega == omega[nodeIndex]]
+        currentValue <- model[[target]]
+        logProbs[currentValue] <<- model$getLogProb(calcNodes)
+		
+        for(k in 1:M) {
+            if(k != currentValue) {
+				if(any(ID_j == k)){
+					logProbs[k] <<- -Inf
+				}else{	
+					model[[target]] <<- k
+					logProbPrior <- model$calculate(target)
+					if(logProbPrior == -Inf) {
+						logProbs[k] <<- -Inf
+					} else {
+						if(is.nan(logProbPrior)) {
+							logProbs[k] <<- -Inf
+						} else {
+							logProbs[k] <<- logProbPrior + model$calculate(calcNodesNoSelf)
+							if(is.nan(logProbs[k])) logProbs[k] <<- -Inf
+						}
+					}
+				}
+			}	
+        }
+        logProbs <<- logProbs - max(logProbs)
+        probs <<- exp(logProbs)
+        newValue <- rcat(1, probs)
+        if(newValue != currentValue) {
+            model[[target]] <<- newValue
+            model$calculate(calcNodes)
+            nimCopy(from = model, to = mvSaved, row = 1, nodes = target, logProb = TRUE)
+            nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
+            nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
+        } else {
+            nimCopy(from = mvSaved, to = model, row = 1, nodes = target, logProb = TRUE)
+            nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfDeterm, logProb = FALSE)
+            nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodesNoSelfStoch, logProbOnly = TRUE)
+        }
+    },
+    methods = list( reset = function() { } )
+)
 
 
 

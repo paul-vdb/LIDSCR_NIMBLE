@@ -1,18 +1,35 @@
 library(coda)
 library(ggplot2)
+library(tidyverse)
 setwd("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/output/ASCRSimulations")
 
 files <- dir()
+files <- grep(".Rda", files, value = TRUE)
+
 # files <- grep("Scenario2", files, value = TRUE)
 # files <- files[!grepl("Scenario2", files)]
 # files <- grep("Scenario3", files, value = TRUE)
 
+# a = "ASCR_Scenario2_KnownID_iter_101.Rda"
+# b = "ASCR_Scenario2_LatentID_iter_101.Rda"
+
+# load(a)
+# load(b)
+
 res <- NULL
 modes <- data.frame()
-pars <- c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'D')
+pars <- c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'EN', 'D')
 for( i in files) 
 {
+	Scenario <- NULL
+	if(grepl("Scenario1", i)) Scenario <- "C"
+	if(grepl("Scenario2", i)) Scenario <- "B"
+	if(grepl("Scenario3", i)) Scenario <- "A"
+
+	if(is.null(Scenario)) next;
+
 	load(i)
+	
 	if(grepl("Known", i)){
 		out <- out2
 		Method = "Known ID"
@@ -20,35 +37,111 @@ for( i in files)
 		out <- out1
 		Method = "Latent ID"
 	}
-		Dmode <- MCMCglmm::posterior.mode(out)[pars]
+	Dmode <- MCMCglmm::posterior.mode(out)[pars]
 
+	# Cheeky conv.check
+	mean1 = apply(out[1:10000, pars], 2, mean)
+	mean2 = apply(out[10001:20000, pars], 2, mean)
+	meanDiff = mean1 - mean2
 
 	tmp <- cbind(data.frame(summary(out[, pars])[[1]]), 
 		data.frame(summary(out[, pars])[[2]]),
 		mode = as.numeric(Dmode))
+	tmp$iter <- i
+	tmp$sd.chain <- apply(out[, pars], 2, sd)
 	tmp$parameter <- rownames(tmp)
-	tmp$Method = Method
-	tmp$Scenario <- 1
-	if(grepl("Scenario2", i)) tmp$Scenario <- 2
-	if(grepl("Scenario3", i)) tmp$Scenario <- 3
+	tmp$Method <- Method
+	tmp$Scenario <- Scenario
+	tmp$meanDiff <- meanDiff
 	res <- rbind(res, tmp)
 }
 # plot(out[,c("N", "sigma", "lambda", "g0")])
 
+failed.conv <- which(res$sd.chain == 0)
+res <- res[!res$iter %in% res$iter[failed.conv], ]
+
+# res %>% filter(parameter == "EN" & abs(meanDiff) > 20)	# Definitely some convergence problems... when things max out...
+# load("ASCR_Scenario3_LatentID_iter_101.Rda")
+# plot(out1)
+
 # scenario.vals <- data.frame(parameter = c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'D'),
 	# val = c(0.00055, 2.3, 0.28, 5.75, 55, 55, 408.1633))
-scenario1 <- data.frame(parameter = c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'D'),
-	val = c(0.00055, 2.3, 0.28, 5.75, 55, 55, 408.1633), Scenario = 1)
-scenario2 <- data.frame(parameter = c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'D'),
-	val = c(0.001, 2.3, 0.28, 5.75, 55, 55, 408.1633), Scenario = 2)
-scenario3 <- data.frame(parameter = c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'D'),
-	val = c(0.05, 2.3, 0.28, 5.75, 55, 55, 408.1633), Scenario = 3)
+scenario1 <- data.frame(parameter = c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'D', 'EN'),
+	val = c(0.00055, 2.3, 0.28, 5.75, 55, 55, 408.1633, 55), Scenario = "C")
+scenario2 <- data.frame(parameter = c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'D', 'EN'),
+	val = c(0.001, 2.3, 0.28, 5.75, 55, 55, 408.1633, 55), Scenario = "B")
+scenario3 <- data.frame(parameter = c('sigmatoa', 'sigma', 'lambda', 'g0', 'N[1]', 'N[2]', 'D', 'EN'),
+	val = c(0.05, 2.3, 0.28, 5.75, 55, 55, 408.1633, 55), Scenario = "A")
 scenarios <- rbind(scenario1, scenario2, scenario3)
+
+# Just keep the first 100 of each simulation:
+files <- res[!duplicated(res$iter),]
+iter.keep <- files %>% group_by(Method, Scenario) %>% slice(1:100) %>% ungroup() %>% select(iter)
+res.true <- res
+res <- res[res$iter %in% c(iter.keep[[1]]),]
+
+par.order <-c("D", "EN", "lambda", "sigma", "g0", "sigmatoa")
+res <- res[res$parameter %in% par.order,]
+res$parameter <- factor(res$parameter, levels = par.order)
+
+res <- res %>% left_join(scenarios) %>% mutate(MeanBias = (Mean - val)/val*100, 
+		MedianBias = (X50. - val)/val*100, ModeBias = (mode - val)/val*100)
+
+facet_names <- c('N', 'lambda~(sec^{-1})', 'sigma~(m)', 'g[0]', 'sigma[t]~(sec)' )
+names(facet_names) <- c('EN', 'lambda', 'sigma', 'g0', 'sigmatoa')
+
+# res$Scenario = factor(res$Scenario, levels = c(3,2,1), labels = c("A", "B", "C"))
+
+pts.mode <- res %>% group_by(parameter, Scenario, Method) %>% summarize(ModeBias = mean(ModeBias))
+res %>% group_by(parameter, Scenario, Method) %>% summarize(n())
+
+
+ggplot(data=res %>% filter(parameter %in% names(facet_names)), aes(y = ModeBias, fill = Method, x = Scenario)) + 
+	facet_wrap(~parameter, labeller = as_labeller(x = facet_names, label_parsed), ncol = 5, nrow = 1) + 
+	geom_boxplot(width = 0.75) +
+	geom_hline(yintercept = 0, col = 'red') +
+	ylim(-75,150) +
+	theme_classic() + ylab("Relative Posterior Mode Bias (%)") + xlab("Scenario") + 
+	# scale_fill_grey(start = 0.9, end = 0.25)
+	scale_fill_brewer(palette = 1, direction = 1) 
+	ggsave("../../output/FrogResults/FrogSimulationsModePosterior.png", 
+		dpi = 'print', width = 9.75, height = 7.35, units = 'in')
+
+
+res.long <- res %>% dplyr::select(Method, Scenario, iter, parameter, MeanBias, ModeBias, MedianBias) %>%
+	gather("variable", "value", MeanBias, ModeBias, MedianBias)
+
+facet_names <- c('N', 'lambda~(sec^{-1})', 'sigma~(m)', 'g[0]', 'sigma[t]~(sec)', 'Mean', 'Median', 'Mode')
+names(facet_names) <- c('EN', 'lambda', 'sigma', 'g0', 'sigmatoa', 'MeanBias', 'MedianBias',  'ModeBias')
+
+ggplot(data=res.long %>% filter(parameter != "D"), aes(y = value, fill = Method, x = factor(Scenario))) + 
+	facet_grid(variable~parameter, labeller = as_labeller(x = facet_names, label_parsed)) + 
+	geom_boxplot(width = 0.75) +
+	geom_hline(yintercept = 0, col = 'black') +
+	ylim(-75,150) +
+	# stat_summary(fun.y="mean", color="red", shape=4)	
+	theme_classic() + ylab("Relative Posterior Bias (%)") + xlab("Scenario") + 
+	# scale_fill_grey(start = 0.9, end = 0.25)
+	scale_fill_brewer(palette = 1, direction = 1)
+ggsave("../../output/FrogResults/FrogSimulationsAllPosterior.png", dpi = 'print', 
+	width = 12.5, height = 9.75, units = 'in')
+
+
+ggplot(data=res.long %>% filter(parameter != "D"), aes(y = value, fill = Method, x = factor(Scenario))) + 
+	facet_grid(parameter~variable, labeller = as_labeller(x = facet_names, label_parsed), scale = 'free_y') + 
+	geom_boxplot(width = 0.75) +
+	geom_hline(yintercept = 0, col = 'black') +
+	# stat_summary(fun.y="mean", color="red", shape=4)	
+	theme_classic() + ylab("Posterior Bias (%)") + xlab("Scenario") + 
+	# scale_fill_grey(start = 0.9, end = 0.25)
+	scale_fill_brewer(palette = 1, direction = 1)
+
+
 
 ggplot(data=res, aes(y = Mean, x = Method)) + facet_wrap(~parameter, scales = "free") + 
 	geom_violin() + 
 	geom_boxplot(width = 0.25) +
-	geom_hline(data = scenario.vals, aes(yintercept=val), col = 'red') + 
+	geom_hline(data = scenarios, aes(yintercept=val), col = 'red') + 
 	theme_classic() + ggtitle("Posterior Means")
 
 ggplot(data=res, aes(y = X50., x = Method)) + facet_wrap(~parameter, scales = "free") + 

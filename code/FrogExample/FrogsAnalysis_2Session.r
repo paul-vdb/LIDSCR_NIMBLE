@@ -233,6 +233,8 @@ for( i in 1:3 )
 out <- as.mcmc.list(out.list)
 # summary(out)
 save(out, file = "../../output/FrogResults/LIDASCR.Rda")
+# load("../../output/FrogResults/LIDASCR.Rda")
+
 
 ###########
 # Known ID ASCR from Stevenson 2020
@@ -396,10 +398,20 @@ cdascr$Method <- "CD"
 # cdascr["lambda0", "Mean"] <- cdascr["lambda0", "Mean"]
 # save(cdascr, file = "../../output/FrogResults/ascr_mle.Rda")
 load("../../output/FrogResults/ascr_mle.Rda")
+load("../../output/FrogResults/LIDASCR.Rda")
+load("../../output/FrogResults/IDASCR.Rda")
 
 library(reshape2)
 library(ggplot2)
 # Now plot results:
+
+MCMCglmm::posterior.mode(out)
+cd <- do.call('c', out[, "D"])*do.call("c", out[, "lambda"])
+MCMCglmm::posterior.mode(cd)
+MCMCglmm::posterior.mode(out.id)
+cd.id <- do.call('c', out.id[, "D"])*do.call("c", out.id[, "lambda"])
+MCMCglmm::posterior.mode(cd.id)
+
 
 out.lid <- do.call("rbind", lapply(out, as.data.frame))
 out.lid$Method = "LID"
@@ -416,19 +428,21 @@ all.out$value <- as.numeric(all.out$value)
 
 save(all.out, file = "../../output/FrogResults/CombinedFrogMCMCOutput.Rda")
 
-facet_names <- c('g[0]', 'sigma~(m)', 'lambda~(sec^{-1})', 'D~(Ind~Ha^{-1})', 'sigma[t]~(s)', "Call~Density~(Calls~Ha^-1~Second^-1)" )
+facet_names <- c('g[0]', 'sigma~(m)', 'lambda~(sec^{-1})', 'D~(Ind~Ha^{-1})', 'sigma[t]~(sec)', "Call~Density~(Calls~Ha^-1~Second^-1)" )
 names(facet_names) <- c("g0", "sigma", "lambda", "D", "sigmatoa", "CD")
 
+cdascr$Method <- "CD"
 
 ggplot(data = all.out, aes(y = value, x = Method)) + 
 	facet_wrap(~variable, scale = "free", labeller = as_labeller(x = facet_names, label_parsed)) + 
 	geom_point(data = cdascr, aes(x = Method, y = Mean)) +
 	geom_errorbar(data = cdascr, aes(y = Mean, ymin = `X2.5..`, ymax = `X97.5..`), width = 0.2) +
 	theme_classic() +
-	geom_boxplot(width = 0.1, outlier.alpha = 0, fill = "black", colour = "white") + 
+	geom_boxplot(width = 0.075, outlier.alpha = 0, fill = "grey", colour = "black") + 
 	geom_violin(alpha = 0, adjust = 2) + 
 	ylab("") + xlab("")
-ggsave("../../output/FrogResults/CombinedFrogMCMCOutput.png", dpi = 'print')
+ggsave("../../output/FrogResults/CombinedFrogMCMCOutput.png", dpi = 'print',
+	width = 9.75, height = 7.35, units = 'in')
 
 out.lid.l <- melt(out.lid)
 
@@ -451,12 +465,14 @@ ggplot(data = out.lid.l[out.lid.l$variable %in% c("K1", "K2"),], aes(x = value))
 # Posterior plots of location given parameter values:
 ###
 library(ggplot2)
-post.mask <- function(capt, toa = NULL, pars, Time = 30, mask, traps, detfn = 'hn', speed.sound = 330){
+post.mask <- function(capt, toa = NULL, pars, Time = 30, mask, traps, detfn = 'hn', 
+	speed.sound = 330, cd = FALSE){
 	d2 <- t(apply(mask, 1, FUN = function(x){(x[1] - traps[,1])^2 + (x[2] - traps[,2])^2}))
 	
 	sigma <- pars['sigma']
 	lambda <- pars['lambda']
 	g0 <- pars['g0']
+	sigmatoa <- 0.001
 	sigmatoa <- pars['sigmatoa']	
 
 	if(g0>0) detfn <- "hhn"
@@ -473,7 +489,7 @@ post.mask <- function(capt, toa = NULL, pars, Time = 30, mask, traps, detfn = 'h
 	p. <- 1-exp(l.tmp)
 
 	# Time of arrival function:
-	getTOA <- function(x, y, d2, nu = 330, sd = 0.001)
+	getTOA <- function(x, y, d2, nu = 330, sd = sigmatoa)
 	{
 		m <- sum(y)
 		if(m == 1){
@@ -494,7 +510,7 @@ post.mask <- function(capt, toa = NULL, pars, Time = 30, mask, traps, detfn = 'h
 	if(is.null(dim(capt))) {
 		k <- 1
 		ll <- rowSums(t(apply(pkj, 1, FUN = function(x){dbinom(x = capt, size = 1, prob = x, log = TRUE)})))
-		# ll <- ll + getTOA(toa, capt, d2, nu = speed.sound, sd = sigmatoa)
+		ll <- ll + getTOA(toa, capt, d2, nu = speed.sound, sd = sigmatoa)
 	}else{
 		for(i in 1:k)
 		{
@@ -502,19 +518,69 @@ post.mask <- function(capt, toa = NULL, pars, Time = 30, mask, traps, detfn = 'h
 			ll <- ll + getTOA(toa[i,], capt[i,], d2, nu = speed.sound, sd = sigmatoa)
 		}
 	}
-	ll <- ll - lambda*Time*p. + k*log(lambda)
+	if(cd == FALSE){
+		ll <- ll - lambda*Time*p. + k*log(lambda)
+	}
 	return(exp(ll))
 }
 
-test.capt <- capt.all$bincapt[capt.all$bincapt[,7] == 1, 1:6]
-test.toa <- capt.all$toa[capt.all$bincapt[,7] == 1,]
-pars <- c("sigma" = 2.3, "lambda" = 0.3, "g0" = 5.75, "sigmatoa" = 0.001)
+test.capt <- capt.all$bincapt[capt.all$bincapt[,7] == 104, 1:6]
+test.toa <- capt.all$toa[capt.all$bincapt[,7] == 104,]
+
 post.locs <- post.mask(capt = test.capt, toa = test.toa, pars, Time = 30, mask, traps, detfn = 'hn')
 
-ggplot(data = data.frame(mask), aes(x = x, y = y, fill = post.locs)) + geom_tile() +
-	geom_point(data = data.frame(traps), aes(x=x, y=y, fill = NULL), col = 'red') + 
-	theme_classic()
+post.locs.cd <- lapply(c(0.05, 0.001, 0.00055), 
+	FUN = function(x){
+		parsx <- c("sigma" = 2.2, "lambda" = 0.3, "g0" = 7.5, "sigmatoa" = x);
+		post.mask(capt = test.capt[3,], toa = test.toa[3,], parsx, Time = 30, mask, traps, detfn = 'hhn', cd = TRUE)}
+		)
+		
+pars1 <- c("sigma" = 2.3, "lambda" = 0.3, "g0" = 5.75, "sigmatoa" = 1);
+tmp1 <- post.mask(capt = test.capt[3,], toa = test.toa[3,], pars1, Time = 30, mask, traps, detfn = 'hhn', cd = TRUE)
+
+pars1 <- c("sigma" = 2.3, "lambda" = 0.3, "g0" = 5.75, "sigmatoa" = 0.015);
+tmp1 <- post.mask(capt = test.capt[4,], toa = test.toa[4,], pars1, Time = 30, mask, traps, detfn = 'hhn', cd = TRUE)
+
+pars <- c("sigma" = 2.3, "lambda" = 0.3, "g0" = 5.75, "sigmatoa" = 0.000015);
+tmp2 <- post.mask(capt = test.capt[4,], toa = test.toa[4,], pars1, Time = 30, mask, traps, detfn = 'hhn', cd = TRUE)
+
+plot.dat <- data.frame(rbind(mask, mask, mask), posterior = do.call('c', post.locs.cd), 
+	sigmatval = factor(rep(c(0.05, 0.001, 0.00055), each = nrow(mask), levels = c(0.05, 0.001, 0.00055))))
+
+library(dplyr)
+dat.max <- plot.dat %>% group_by(sigmatval) %>% slice_max(posterior)
+
+save(plot.dat, file = "../../output/FrogResults/FrogLocationsExample.Rda")
+load(file = "../../output/FrogResults/FrogLocationsExample.Rda")
+
+ggplot(data = plot.dat, aes(x = x, y = y, z = posterior, colour = sigmatval)) + 
+	geom_contour(aes(linetype = sigmatval), breaks = c(0.9), size = 1) +
+	theme_classic() + xlim(range(mask[,1])) + ylim(range(mask[,2])) +
+	geom_point(data = data.frame(traps), aes(x=x, y=y, z= NULL), col = 'red', shape = 3, size = 2) +
+	geom_point(data = data.frame(traps)[test.capt[3,] == 1,], aes(x=x, y=y, z= NULL), col = 'red', shape = 1, size = 4) +
+	xlab("x (m)") + ylab("y (m)") + 
+	scale_color_manual(name = expression(sigma[t]~(sec)),
+		values = c("#99E1D9", "#548687", "#414770")) + 
+	scale_linetype_discrete(name = expression(sigma[t]~(sec))) + 
+	coord_fixed() + 
+	theme(legend.position = "bottom")
+ggsave("../../output/FrogResults/FrogLocationsExample.png", dpi = 'print', 
+	width = 5.5, height = 5.5, units = 'in')
+
+# ggsave("../../output/FrogResults/FrogLocationsExample.png", dpi = 'print', width = 7.24, height = 5.95)
+
+
+
+  scale_fill_distiller(palette = "Spectral", direction = -1)
+ggplot(data = data.frame(mask), aes(x = x, y = y)) + 
+	geom_point(data = data.frame(traps), aes(x=x, y=y, z= NULL), col = 'red', shape = 3, size = 2) +
+	# geom_contour(aes(z = post.locs), col = 'red') +
+	geom_contour(aes(z = post.locs.cd[[1]]), col = 'black') +
+	geom_contour(aes(z = post.locs.cd[[2]]), col = 'blue') +
+	geom_contour(aes(z = post.locs.cd[[4]]), col = 'red') +
+	theme_classic() + xlim(range(mask[,1])) + ylim(range(mask[,2]))
+
 ggplot(data = data.frame(mask), aes(x = x, y = y, z = post.locs)) + geom_contour() +
-	geom_point(data = data.frame(traps), aes(x=x, y=y, z= NULL), col = 'red') + 
-	theme_classic()
+	geom_point(data = data.frame(traps), aes(x=x, y=y, z= NULL), col = 'red', shape = 3, size = 2) + 
+	theme_classic() + xlim(range(mask[,1])) + ylim(range(mask[,2]))
 	

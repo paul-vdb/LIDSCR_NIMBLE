@@ -22,7 +22,7 @@ registerDoParallel(cl)
 source("../Functions/SimData.R")
 load("../../data/stacked-lightfooti.Rdata")
 
-results <- foreach(h=1:100,
+results <- foreach(h=1:110,
 			.packages = c("coda", "nimbleSCR", "nimble"))%dopar%{
 	source("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/code/Functions/NimbleFunctions.R")
 	
@@ -39,10 +39,10 @@ results <- foreach(h=1:100,
 	N <- 55
 	
 	### Scenario 2: 2 sessions
-	dat1 <- simASCR(N = N, sigma = 2.3, sigma_toa = 0.05, g0 = 5.75, lambda = 0.28, 
+	dat1 <- simASCR(N = N, sigma = 2.3, sigma_toa = 0.00055, g0 = 5.75, lambda = 0.28, 
 		StudyPeriod = Time, traps = traps, 
 		limits = list(xlim = xlim, ylim = ylim))
-	dat2 <- simASCR(N = N, sigma = 2.3, sigma_toa = 0.05, g0 = 5.75, lambda = 0.28, 
+	dat2 <- simASCR(N = N, sigma = 2.3, sigma_toa = 0.00055, g0 = 5.75, lambda = 0.28, 
 		StudyPeriod = Time, traps = traps, 
 		limits = list(xlim = xlim, ylim = ylim))
 
@@ -192,15 +192,13 @@ results <- foreach(h=1:100,
 	Cmodel <- compileNimble(Rmodel)
 	Cmcmc <- compileNimble(Rmcmc, project = Rmodel)
 
-	Cmcmc$run(1000)
-
 	Cmcmc$run(40000)
 	mvSamples <- Cmcmc$mvSamples
 	samples <- as.matrix(mvSamples)
 	out1 <- mcmc(samples[-(1:20000),])
 	out1 <- out1[,c('psi', 'sigma', 'lambda', 'sigmatoa', 'g0', 'EN', 'N[1]','N[2]', 'D')]
 	# plot(out1[, c("N[1]", "N[2]", "D", "sigma", "sigmatoa")])
-	save(out1, file = paste0("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/output/ASCRSimulations/ASCR_Scenario3_LatentID_iter_", h, ".Rda"))
+	save(out1, file = paste0("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/output/ASCRSimulations/ASCR_Scenario1_LatentID_iter_", h, ".Rda"))
 	# summary(out)
 	output1 <- data.frame(do.call("cbind", summary(out1)))
 
@@ -292,7 +290,7 @@ results <- foreach(h=1:100,
 	out2 <- mcmc(samples[-(1:20000),])
 	out2 <- out2[,c('psi', 'sigma', 'lambda', 'sigmatoa', 'g0', 'EN', 'N[1]','N[2]', 'D')]
 	plot(out2)
-	save(out2, file = paste0("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/output/ASCRSimulations/ASCR_Scenario3_KnownID_iter_", h, ".Rda"))	
+	save(out2, file = paste0("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/output/ASCRSimulations/ASCR_Scenario1_KnownID_iter_", h, ".Rda"))	
 	output2 <- data.frame(do.call("cbind", summary(out2)))
 	
 	output1$Method = "Latent ID"
