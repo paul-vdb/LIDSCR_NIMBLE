@@ -63,7 +63,7 @@ Model.pb <- nimbleCode({
 
     # Trap history model.
     # and unobserved animal ID.
-	n[1:J] ~ dPoisBin(prob = pkj[1:M,1:J], thresh = 0.00001)
+	n[1:J] ~ dPoisBin(prob = pkj[1:M,1:J], z = z[1:M])
 	
 	# Speed up to not bother adding any traps that had no detections to the Poisson Binomial
 	# H0 <- sum(Hk[1:M])
@@ -120,7 +120,7 @@ init <- function(){
 		z[ID] <- 1
 
 		pkj <- 1-exp(-hkj*lambda*z)
-		tmp <- dPoisBin(n, prob = pkj, 0, 0)
+		tmp <- dPoisBin(n, prob = pkj,  z = z[1:M], 0)
 	}
 	list(
 		lambda = lambda,

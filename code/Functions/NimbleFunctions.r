@@ -104,31 +104,20 @@ rbinom_vector_ascr <- nimbleFunction(
   })
 
 
-RdensityFunction <- function(x = double(1), prob = double(2), thresh = double(0, default = 0), log = integer(0, default = 0)) {
+RdensityFunction <- function(x = double(1), prob = double(2), z = double(1), log = integer(0, default = 0)) {
     require(poisbinom)
 	val <- 0
 	for(j in 1:ncol(prob))
 	{
-		if(x[j] == 0) 
-		{	
-			val <- val + log(sum(1-prob[,j]))
-		}else{
-			pp <- prob[prob[, j] > thresh, j]
-			if(sum(pp > 0) > x[j]) 
-			{
-				if(x[j] > 0) val <- val + dpoisbinom(x[j], pp = pp, log = 1)
-			}else{
-				val <- -Inf
-				if(log) return(val) else return(exp(val))		
-			}
-		}
-	}
+		if(x[j] == 0) val <- val + log(sum(1-prob[,j]))
+		if(x[j] > 0) val <- val + dpoisbinom(x[j], pp = prob[z==1,j], log = 1)
+    }
 	returnType = double(0)
     if(log) return(val) else return(exp(val))
 }
 
 dPoisBin <- nimbleRcall(
-    prototype = function(x = double(1), prob = double(2), thresh = double(0), log = integer(0)) {},
+    prototype = function(x = double(1), prob = double(2), z = double(1), log = integer(0)) {},
     returnType = double(0),
     Rfun = 'RdensityFunction'
 )
@@ -173,8 +162,8 @@ registerDistributions(
 		 dnorm_vector_marg = list(BUGSdist = 'dnorm_vector_marg(mean, sd, y)',
 				   types = c('value = double(1)', 'mean = double(1)', 'sd = double(0)', 'y = double(1)')),
       	 dPoisBin = list(
-				   BUGSdist = 'dPoisBin(prob, thresh)', Rdist = 'dPoisBin(prob, thresh)',
-				   types = c('value = double(1)', 'prob = double(2)', 'thresh = double(0)')
+				   BUGSdist = 'dPoisBin(prob, z)', Rdist = 'dPoisBin(prob, z)',
+				   types = c('value = double(1)', 'prob = double(2)', 'z = double(1)')
 				   ),
       	 dPoisSC = list(
 				   BUGSdist = 'dPoisSC(lambda,J)', Rdist = 'dPoisSC(lambda,J)',
