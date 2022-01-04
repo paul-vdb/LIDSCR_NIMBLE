@@ -7,6 +7,7 @@ setwd("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/code/Bernoulli")
 library(coda)
 library(nimble)
 library(nimbleSCR)
+library(poisbinom)
 
 source("../Functions/SimData.R")
 source("C:/Users/Paul/Documents/GitHub/LIDSCR_NIMBLE/code/Functions/NimbleFunctions.R")
@@ -325,7 +326,7 @@ Model.a <- nimbleCode({
 	D <- N/area
 })
 
-M <- 50
+M <- 100
 
 constants <- list(
     J = nrow(traps),
@@ -422,5 +423,37 @@ legend("topright",legend = c("Poisson-Binomial", "Poisson Approx", "Allocation M
 abline(v = 15, col = 'black', lty = 'dashed')
 
 plot(out.mpp[,c('sigma', 'lambda', 'N')])
-plot(out.p[,c('sigma', 'lambda', 'N')])
+plot(out.1[,c('sigma', 'lambda', 'N')])
 
+par(mfrow = c(3,1))
+plot(density(out.mpp[, 'sigma']), main = 'sigma')
+lines(density(out.a[, 'sigma']), col = 'blue')
+abline(v = 0.75, col = 'red')
+legend('topright', legend = c("Poisson Binomial", "Allocation"), col = c("black", "blue"), lty = 1)
+
+plot(density(out.mpp[, 'lambda']), main = 'lambda')
+lines(density(out.a[, 'lambda']), col = 'blue')
+abline(v = 2, col = 'red')
+
+plot(density(out.mpp[, 'N']), main = 'N')
+lines(density(out.a[, 'N']), col = 'blue')
+abline(v = 30, col = 'red')
+
+
+p <- rbeta(100, 1, 5)
+nj <- 0:100
+plot(dpoisbinom(nj, p))
+
+approx.func <- function(p, iters = 1000)
+{
+	n <- NULL
+	for(i in 1:iters)
+	{
+		n <- c(n, sum(rbinom(length(p), 1, prob = p)))
+	}
+	return(n)
+}
+
+tmp <- approx.func(p, 10000)
+plot(dpoisbinom(nj, p), type = 'l')
+lines(density(n), col = 'red')

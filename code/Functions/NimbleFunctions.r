@@ -109,8 +109,7 @@ RdensityFunction <- function(x = double(1), prob = double(2), z = double(1), log
 	val <- 0
 	for(j in 1:ncol(prob))
 	{
-		if(x[j] == 0) val <- val + log(sum(1-prob[,j]))
-		if(x[j] > 0) val <- val + dpoisbinom(x[j], pp = prob[z==1,j], log = 1)
+		val <- val + dpoisbinom(x[j], pp = prob[z==1,j], log = 1)
     }
 	returnType = double(0)
     if(log) return(val) else return(exp(val))
